@@ -20,6 +20,8 @@
 * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
+float ReadWindSpeed();
+
 #include "ms4525do.h"
 
 /* 
@@ -49,21 +51,42 @@ void setup() {
 void loop() {
   int count = 0;
   /* Read the sensor */
-  float sum = 0;
-  while (count < 50) {
-    if (pres.Read()) {
-      /* Display the data */
-      if (count > 0) {
-        sum += pres.pres_pa();
-      }
-      Serial.print(pres.pres_pa(), 6);
-      Serial.print("\n");
-    }
-    delay(100);
-    count+=1;
+  float a = 0;
+  float b = 0;
+  float c = 0;
+
+  float windSpeedArray[3];
+  
+  for(int i = 0; i < 3; i++) {
+    windSpeedArray[i] = ReadWindSpeed();
   }
-  float mean = sum / (count - 1);
-  Serial.print("Mean: ");
-  Serial.println(mean);
-  delay(100000000);
+
+  
+
+  
+//  float sum = 0;
+//  while (count < 50) {
+//    if (pres.Read()) {
+//      /* Display the data */
+//      if (count > 0) {
+//        sum += pres.pres_pa();
+//      }
+//      Serial.print(pres.pres_pa(), 6);
+//      Serial.print("\n");
+//    }
+//    delay(100);
+//    count+=1;
+//  }
+//  float mean = sum / (count - 1);
+//  Serial.print("Mean: ");
+//  Serial.println(mean);
+//  delay(100000000);
+}
+
+float ReadWindSpeed() {
+  Serial.println("Please set a new wind speed");
+  Serial.println("Enter new wind speed");
+
+  float windSpeed = 4.0;
+  return windSpeed;
 }
