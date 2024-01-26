@@ -25,6 +25,11 @@
 #define SW5 28
 #define SW6 29
 #define SW7 30
+#define E_BUTTON 31
+#define LOAD_VOLTAGE A0
+//TODO: Find out why there are two relays
+#define NACELLE_RELAY 32
+#define LOAD_BOX_RELAY 33
 
 //Linear actuator global constants. For linear actuators, 1000 is fully extended and 2000 is fully retracted
 #define INITIAL_PITCH 1500
@@ -33,6 +38,11 @@
 
 //Resistor bank global constants
 #define INITIAL_RESISTANCE 28.0
+#define BASE_RESISTANCE 10.0 //TODO: REPLACE THIS VALUE WITH AN ACTUAL VALUE
+
+//Arduino Mega global constants
+#define OPERATING_VOLTAGE 5.0
+#define ANALOG_RANGE 1023.0
 
 //Enum for the overall operating state machine
 enum operatingStateMachine {
@@ -50,10 +60,12 @@ enum testStateMachine {
   power_select,
   brake,
   pitch,
-  emergency_button,
-  load_disconnect,
   pitot_tube_calibration,
   pitot_tube_measurement,
+  read_base_resistor_voltage,
+  read_power,
+  emergency_button,
+  load_disconnect,
   survival_test,
   steady_power_test,
   power_curve_test,
@@ -72,6 +84,7 @@ bfs::Ms4525do pressureSensor;
 
 //Variable load object
 VariableLoad resistorBank(SW_PARALLEL, SW0, SW1, SW2, SW3, SW4, SW5, SW6, SW7, INITIAL_RESISTANCE);
+float voltageDividerFactor = (BASE_RESISTANCE + INITIAL_RESISTANCE) / BASE_RESISTANCE;
 
 //Liquid Crystal Display
 LiquidCrystal_I2C lcd(0x3f, 20, 4);
@@ -155,26 +168,177 @@ void loop() {
   if(testing) {
     //Testing state transitions
     switch(testState) {
+      
+      case test_select:
+        SelectTest();
+        break;
+        
+      case power_select:
+        testState = test_select;
+        break;
+        
       case brake:
+        testState = test_select;
+        break;
+     
       case pitch:
-      case emergency_stop_test:
+        testState = test_select;
+        break;
+
       case pitot_tube_calibration:
+        testState = test_select;
+        break;
+     
       case pitot_tube_measurement:
+        testState = test_select;
+        break;
+
+      case read_base_resistor_voltage:
+        testState = test_select;
+        break;
+
+      case read_power:
+        testState = test_select;
+        break;
+     
+      case emergency_button:
+        testState = test_select;
+        break;
+     
+      case load_disconnect:
+        testState = test_select;
+        break;
+     
+      case survival_test:
+        testState = test_select;
+        break;
+     
+      case steady_power_test:
+        testState = test_select;
+        break;
+     
+      case power_curve_test:
+        testState = test_select;
+        break;
+     
       case exit_test:
-          operatingState = restart; 
-          testing = false;
-          break;     
+        operatingState = restart; 
+        testing = false;
+        break;     
     }
 
     //Testing state actions
     switch(testState) {
       
+      case test_select:
+        break;
+        
+      case power_select:
+        Serial.print("Select the desired power source. Type e to power externally (from the wall), ");
+        Serial.println("i to power internally (from the turbine).");
+
+        String input = ReadInputString();
+
+        if input.equals("i") {
+          external = false;
+          SetPowerMode(external);
+        }
+        else if input.equals("e") {
+          external = true;
+          SetPowerMode(external);
+        }
+        else {
+          Serial.println("Invalid entry. Returning to test selection");
+        }
+        break;
+        
+      case brake:
+        Serial.println("Select brake setting. Type e for engaged, d for disengaged");
+        
+        String input = ReadInputString();
+
+        if input.equals("e") {
+          SetBrake(BRAKE_ENGAGED);
+        }
+        else if input.equals("d") {
+          SetBrake(BRAKE_DISENGAGED);
+        }
+        else {
+          Serial.println("Invalid entry. Returning to test selection");
+        }
+        break;
+     
+      case pitch:
+        Serial.println("Select pitch value");
+        
+        int input = ReadInputInt();
+
+        if input.equals("e") {
+          SetBrake(BRAKE_ENGAGED);
+        }
+        else if input.equals("d") {
+          SetBrake(BRAKE_DISENGAGED);
+        }
+        else {
+          Serial.println("Invalid entry. Returning to test selection");
+        }
+        break;
+
+      case pitot_tube_calibration:
+        break;
+     
+      case pitot_tube_measurement:
+        break;
+        
+      case read_base_resistor_voltage:
+        break;
+
+      case read_power:
+        break;
+     
+      case emergency_button:
+        break;
+     
+      case load_disconnect:
+        break;
+     
+      case survival_test:
+        break;
+     
+      case steady_power_test:
+        break;
+     
+      case power_curve_test:
+        break;
+     
+      case exit_test:
+        break;    
     }
   }
   
   
 }
 
+//Calculates an estimate of the current power output from the turbine
+void CalculatePower() {
+  //Read the voltage from the load pin and convert it to volts. We are reading in a scaled down voltage that is
+  //only measured across the base resistor as opposed to the whole load. As such, we calculated a voltage
+  //divider factor that converts the voltage we measure to the total voltage across the load, which is the value
+  //we actually want. That voltage divider factor is defined globally and updated each time the resistor bank
+  //changes resistance values.
+  int voltageInt = analogRead(LOAD_VOLTAGE);
+  float baseResistorVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
+  float loadVoltage = baseResistorVoltage * voltageDividerFactor;
+
+  //Read the resistance from the resistor bank
+  float resistance = resistorBank.getResistance();
+
+  //Calculate and return the power
+  float currentPower = (loadVoltage * loadVoltage) / resistance;
+  return currentPower;
+}
+
+//Calibrates the pitot tube based on 3 known wind speeds
 void CalibratePitotTube() {
   // Arrays to store the measured pressure values and wind speed calibration values
   float windSpeedArray[3];
@@ -183,7 +347,7 @@ void CalibratePitotTube() {
   // Read 3 wind speeds and pressures to calibrate
   for(int i = 0; i < 3; i++) {
     // Get the wind speed and store in the array
-    windSpeedArray[i] = (float) ReadWindSpeed();
+    windSpeedArray[i] = (float) InputWindSpeed();
 
     // Average 1000 pressure readings to get a pressure at that wind speed
     float pressureSum = 0.0;
@@ -227,6 +391,38 @@ void CalibratePitotTube() {
   C = abc(2, 0);
 }
 
+//Reads a manually entered wind speed from the serial monitor during calibration
+float InputWindSpeed() {
+  Serial.println("Please enter a new wind speed");
+
+  //Read the wind speed from the serial monitor, output it, and return it
+  int windSpeed = ReadInputInt();
+
+  Serial.print("Wind speed of ");
+  Serial.print(windSpeed, 1);
+  Serial.println("m/s entered.");
+  
+  return windSpeed;
+}
+
+//Reads whether the emergency stop button is pressed. Returns true if pressed, false if not
+bool IsButtonPressed() {
+  return digitalRead(E_BUTTON);
+}
+
+//Reads whether the load is connected. Returns true if connected and false if not
+bool IsLoadConnected() {
+  //TODO: Might change to add some sort of threshold or something
+  int voltage = analogRead(LOAD_VOLTAGE);
+  return voltage != 0;
+}
+
+//Assigns the optimal load based on current conditions
+void OptimizeLoad() {
+  
+}
+
+//Reads an integer input from the serial monitor
 int ReadInputInt() {
   bool inputDetected = false;
 
@@ -242,10 +438,16 @@ int ReadInputInt() {
   }
 
   //Cast the input to type float and return it
-  float inputInt = input.toInt();
+  int inputInt = input.toInt();
+
+  if(inputInt == 0) {
+    Serial.println("WARNING: Non-integer input detected. If you put in a zero, badly done.");
+  }
+  
   return inputInt;
 }
 
+//Reads a string from the serial monitor
 String ReadInputString() {
   //Initialize an input string
   String inputString = "";
@@ -268,6 +470,7 @@ String ReadInputString() {
   return inputString;
 }
 
+//Reads the current RPMs from the encoder
 float ReadRPM() {
   static long oldPosition = 0;
   static long oldTime = 0;
@@ -290,18 +493,87 @@ float ReadRPM() {
 }
 
 float ReadWindSpeed() {
-  Serial.println("Please enter a new wind speed");
-
-  //Read the wind speed from the serial monitor, output it, and return it
-  int windSpeed = ReadInputInt();
-
-  Serial.print("Wind speed of ");
-  Serial.print(windSpeed, 1);
-  Serial.println("m/s entered.");
+  
+    // Average 100 measurements of the pressure
+    float pressureSum = 0.0;
+    int i = 0;
+    int j = 0;
+    for (i = 0; i < 100; i++) {
+      if(pressureSensor.Read()) {
+        j++;
+        float currReading = pressureSensor.pres_pa();
+        
+        pressureSum += currReading;
+      }
+    }
+    float pressureAverage = pressureSum / j;
+    
+  float windSpeed = (-B + sqrt(pow(B, 2) - 4*A*(C - pressureAverage))) / (2*A);
   
   return windSpeed;
 }
 
+//Selects a test state based on manual user input
+void SelectTest() {
+  Serial.print("Enter a desired test. Valid options: pwrsrc\n brake\n pitch\n ebutt\n loaddis\n ptcalib\n ptread\n");
+  Serial.print("survival\n steadypwr\n pwrcurve\n readpwr\n readvolt\n exit\n");
+  
+  String input = ReadInputString();
+
+  if(input.equals("pwrsrc")) {
+    testState = power_select;
+  }
+  
+  if(input.equals("brake")) {
+    testState = brake;
+  }
+  
+  if(input.equals("pitch")) {
+    testState = pitch;
+  }
+  
+  if(input.equals("ebutt")) {
+    testState = emergency_button;
+  }
+  
+  if(input.equals("loaddis")) {
+    testState = load_disconnect;
+  }
+  
+  if(input.equals("ptcalib")) {
+    testState = pitot_tube_calibration;
+  }
+  
+  if(input.equals("ptread")) {
+    testState = pitot_tube_measurement;
+  }
+  
+  if(input.equals("survival")) {
+    testState = survival_test;
+  }
+  
+  if(input.equals("steadypwr")) {
+    testState = steady_power_test;
+  }
+  
+  if(input.equals("pwrcurve")) {
+    testState = power_curve_test;
+  }
+
+  if(input.equals("readpwr")) {
+    testState = read_power;
+  }
+  
+  if(input.equals("readvolt")) {
+    testState = read_base_resistor_voltage;
+  }
+  
+  if(input.equals("exit")) {
+    testState = exit_test;
+  }
+}
+
+//Sets the brake linear actuator to a given position
 void SetBrake(int brakePosition) {
   //We might need to flip a switch to turn on the actuator
   
@@ -309,6 +581,7 @@ void SetBrake(int brakePosition) {
   brakeActuator.writeMicroseconds(brakePosition);
 }
 
+//Sets the pitch linear actuator to a given position
 void SetPitch(int pitchAngle){
   //We might need to flip a switch to turn on the actuator
 
@@ -316,30 +589,47 @@ void SetPitch(int pitchAngle){
   pitchActuator.writeMicroseconds(pitchAngle);
 }
 
-//Function to set up the LCD screen
+//Sets the load to a given resistance value
+void SetLoad(float resistance) {
+  //TODO: Check with power to make sure this is the best way to do this
+  resistorBank.setBestResistanceMatch(resistance);
+}
+
+//Switches the power supply between nacelle power coming from the wind turbine and nacelle power
+//coming from the wall supply
+void SetPowerMode(bool setExternal) {
+  //TODO: ARE THESE THE RIGHT VALUES?
+  if(setExternal) {
+    digitalWrite(NACELLE_RELAY, LOW);
+    digitalWrite(LOAD_BOX_RELAY, HIGH);
+  }
+  else {
+    digitalWrite(NACELLE_RELAY, HIGH);
+    digitalWrite(LOAD_BOX_RELAY, LOW);
+  }
+}
+
+//Sets up the LCD screen
 void SetupLCD() {
   //Initialize the LCD screen and backlight it
   lcd.init();
   lcd.backlight();
 }
 
-//Function to set up all Arduino pins
+//Sets up all Arduino pins
 void SetupPins() {
   //Set all output pins
   pinMode(BRAKE_CONTROL, OUTPUT);
   pinMode(PITCH_CONTROL, OUTPUT);
-  pinMode(SW_PARALLEL, OUTPUT);
-  pinMode(SW0, OUTPUT);
-  pinMode(SW1, OUTPUT);
-  pinMode(SW2, OUTPUT);
-  pinMode(SW3, OUTPUT);
-  pinMode(SW4, OUTPUT);
-  pinMode(SW5, OUTPUT);
-  pinMode(SW6, OUTPUT);
-  pinMode(SW7, OUTPUT);
+  pinMode(E_BUTTON, INPUT);
+  pinMode(LOAD_VOLTAGE, INPUT);
+  pinMode(NACELLE_RELAY, OUTPUT);
+  digitalWrite(NACELLE_RELAY, LOW); //TODO: Find out whether this is the right value
+  pinMode(LOAD_BOX_RELAY, OUTPUT);
+  digitalWrite(LOAD_BOX_RELAY, HIGH); //TODO: Find out whether this is the right value
 }
 
-//Function to set up the pressure sensor
+//Sets up the pressure sensor
 void SetupPressureSensor() {
   pressureSensor.Config(&Wire, 0x28, 1.0f, -1.0f);
   /* Starting communication with the pressure transducer */
@@ -348,7 +638,7 @@ void SetupPressureSensor() {
   }
 }
 
-//Function to set up all servo motors
+//Sets up all servo motors
 void SetupServos() {
   //Initialize pitch control linear actuator
   pitchActuator.attach(PITCH_CONTROL);
