@@ -33,6 +33,8 @@
 
 //Linear actuator global constants. For linear actuators, 1000 is fully extended and 2000 is fully retracted
 #define INITIAL_PITCH 1500
+#define MINIMUM_PITCH 1200
+#define MAXIMUM_PITCH 1800
 #define BRAKE_DISENGAGED 1700
 #define BRAKE_ENGAGED 1300
 
@@ -95,11 +97,21 @@ float B;
 float C;
 
 void setup() {
+  //Start up the Serial Monitor
+  //For the entry into the Serial Monitor, make sure the box next to the baud rate reads "Newline"
+  //and not "Both NL & CR" or anything else. Otherwise, text entry will not work, and no testing
+  //state transitions can occur
+  Serial.begin(115200);
+  
   // put your setup code here, to run once:
   SetupPins();
+  Serial.println("Pins set up");
   SetupLCD();
+  Serial.println("LCD set up");
   SetupServos();
+  Serial.println("Servo set up");
   SetupPressureSensor();
+  Serial.println("Pressure sensor set up");
 
   //Set the states for the state machine
   operatingState = restart;
@@ -107,16 +119,25 @@ void setup() {
 
   //Calibrate the pitot tube
   CalibratePitotTube();
+  Serial.println("Pitot tube calibrated");
 }
 
 void loop() {
+  //For the entry into the Serial Monitor, make sure the box next to the baud rate reads "Newline"
+  //and not "Both NL & CR" or anything else. Otherwise, text entry will not work, and no testing
+  //state transitions can occur
+  
   // put your main code here, to run repeatedly:
   //Read in the input if available to determine whether to switch to the test state
   static bool testing = false;
-  
-  String input = ReadInputString();
-  if(input.equals("test")) {
-    operatingState = test;
+
+  if(Serial.available()){
+    String input = Serial.readStringUntil('\n');
+    Serial.println(input);
+    if(input.equals("test")) {
+      Serial.println("Entering test state");
+      operatingState = test;
+    }
   }
 
   //Operating state transitions
@@ -170,7 +191,9 @@ void loop() {
     switch(testState) {
       
       case test_select:
+        Serial.println("Entering test selection state");
         SelectTest();
+        delay(1000);
         break;
         
       case power_select:
@@ -236,64 +259,86 @@ void loop() {
       case power_select:
         Serial.print("Select the desired power source. Type e to power externally (from the wall), ");
         Serial.println("i to power internally (from the turbine).");
-
-        String input = ReadInputString();
-
-        if input.equals("i") {
-          external = false;
-          SetPowerMode(external);
+        while(!Serial.available()) {
         }
-        else if input.equals("e") {
-          external = true;
-          SetPowerMode(external);
+
+        
+        String powerInput = Serial.readStringUntil('\n');
+        bool setExternal;
+
+        if(powerInput.equals("i")) {
+          setExternal = false;
+          SetPowerMode(setExternal);
+        }
+        else if(powerInput.equals("e")) {
+          setExternal = true;
+          SetPowerMode(setExternal);
         }
         else {
-          Serial.println("Invalid entry. Returning to test selection");
+          Serial.println("Invalid entry. Returning to test selection...");
         }
         break;
         
       case brake:
         Serial.println("Select brake setting. Type e for engaged, d for disengaged");
-        
-        String input = ReadInputString();
+        while(!Serial.available()) {
+        }
+        String brakeInput = Serial.readStringUntil('\n');
 
-        if input.equals("e") {
+        if(brakeInput.equals("e")) {
           SetBrake(BRAKE_ENGAGED);
         }
-        else if input.equals("d") {
+        else if(brakeInput.equals("d")) {
           SetBrake(BRAKE_DISENGAGED);
         }
         else {
-          Serial.println("Invalid entry. Returning to test selection");
+          Serial.println("Invalid entry. Returning to test selection...");
         }
         break;
      
       case pitch:
-        Serial.println("Select pitch value");
+        char message[200];
+        sprintf(message, "Select pitch value. Enter an integer value between %d and %d (inclusive)", 
+                MINIMUM_PITCH, MAXIMUM_PITCH);
+        Serial.println(message);
         
-        int input = ReadInputInt();
+        int pitchInput = ReadInputInt();
 
-        if input.equals("e") {
-          SetBrake(BRAKE_ENGAGED);
-        }
-        else if input.equals("d") {
-          SetBrake(BRAKE_DISENGAGED);
+        if(pitchInput >= MINIMUM_PITCH && pitchInput <= MAXIMUM_PITCH) {
+          SetPitch(pitchInput);
         }
         else {
-          Serial.println("Invalid entry. Returning to test selection");
+          Serial.println("Invalid entry. Returning to test selection...");
         }
         break;
 
       case pitot_tube_calibration:
+        CalibratePitotTube();
         break;
      
       case pitot_tube_measurement:
+        float windSpeed = ReadWindSpeed();
+        
+        Serial.print("Current wind speed: ");
+        Serial.print(windSpeed);
+        Serial.println(" m/s");
         break;
         
       case read_base_resistor_voltage:
+        int voltageInt = analogRead(LOAD_VOLTAGE);
+        float baseResistorVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
+
+        Serial.print("Current base resistor voltage: ");
+        Serial.print(voltageInt);
+        Serial.println(" V");
         break;
 
       case read_power:
+        float power = CalculatePower();
+
+        Serial.print("Current power output: ");
+        Serial.print(power);
+        Serial.println(" W");
         break;
      
       case emergency_button:
@@ -320,7 +365,7 @@ void loop() {
 }
 
 //Calculates an estimate of the current power output from the turbine
-void CalculatePower() {
+float CalculatePower() {
   //Read the voltage from the load pin and convert it to volts. We are reading in a scaled down voltage that is
   //only measured across the base resistor as opposed to the whole load. As such, we calculated a voltage
   //divider factor that converts the voltage we measure to the total voltage across the load, which is the value
@@ -425,17 +470,9 @@ void OptimizeLoad() {
 //Reads an integer input from the serial monitor
 int ReadInputInt() {
   bool inputDetected = false;
-
-  String input = ReadInputString();
-
-  //Keep trying to read input until input is detected. This function is only used in the test state 
-  //and setup so code blocking is not a problem.
-  while(!inputDetected) {
-    input = ReadInputString();
-    if(input.length() > 0) {
-      inputDetected = true;
-    }
+  while(!Serial.available()){
   }
+  String input = Serial.readStringUntil('\n');
 
   //Cast the input to type float and return it
   int inputInt = input.toInt();
@@ -447,28 +484,28 @@ int ReadInputInt() {
   return inputInt;
 }
 
-//Reads a string from the serial monitor
-String ReadInputString() {
-  //Initialize an input string
-  String inputString = "";
-
-  //Read in all entered values and store them as a string
-  while(Serial.available()) {
-    //Read values until a newline is read, which signifies the end of the input.
-    while(true) {
-      char c = Serial.read();
-      
-      if(c == '\n') {
-        break;
-      }
-
-      Serial.println(c);
-      inputString += c;
-    }
-  }
-
-  return inputString;
-}
+////Reads a string from the serial monitor
+//String ReadInputString() {
+//  //Initialize an input string
+//  String inputString = "";
+//
+//  //Read in all entered values and store them as a string
+//  while(Serial.available()) {
+//    //Read values until a newline is read, which signifies the end of the input.
+//    while(true) {
+//      char c = Serial.read();
+//      
+//      if(c == '\n') {
+//        break;
+//      }
+//
+//      Serial.println(c);
+//      inputString += c;
+//    }
+//  }
+//
+//  return inputString;
+//}
 
 //Reads the current RPMs from the encoder
 float ReadRPM() {
@@ -515,10 +552,12 @@ float ReadWindSpeed() {
 
 //Selects a test state based on manual user input
 void SelectTest() {
-  Serial.print("Enter a desired test. Valid options: pwrsrc\n brake\n pitch\n ebutt\n loaddis\n ptcalib\n ptread\n");
-  Serial.print("survival\n steadypwr\n pwrcurve\n readpwr\n readvolt\n exit\n");
-  
-  String input = ReadInputString();
+  Serial.print("Enter a desired test. Valid options:\npwrsrc\nbrake\npitch\nebutt\nloaddis\nptcalib\nptread\n");
+  Serial.print("survival\nsteadypwr\npwrcurve\nreadpwr\nreadvolt\nexit\n");
+
+  while(!Serial.available()){
+  }
+  String input = Serial.readStringUntil('\n');
 
   if(input.equals("pwrsrc")) {
     testState = power_select;
