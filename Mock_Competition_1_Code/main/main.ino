@@ -35,8 +35,8 @@
 #define INITIAL_PITCH 1500
 #define MINIMUM_PITCH 1200
 #define MAXIMUM_PITCH 1800
-#define BRAKE_DISENGAGED 1700
-#define BRAKE_ENGAGED 1300
+#define BRAKE_DISENGAGED 1300
+#define BRAKE_ENGAGED 1700
 
 //Resistor bank global constants
 #define INITIAL_RESISTANCE 28.0
@@ -47,17 +47,19 @@
 #define ANALOG_RANGE 1023.0
 
 //Enum for the overall operating state machine
-enum operatingStateMachine {
+typedef enum {
   restart,
   power_curve,
   steady_power,
   survival,
   emergency_stop,
   test
-} operatingState;
+} operatingStateMachine;
+
+operatingStateMachine operatingState = restart;
 
 //Enum for the substates within the "test" state of the overall state machine
-enum testStateMachine {
+typedef enum {
   test_select,
   power_select,
   brake,
@@ -72,7 +74,9 @@ enum testStateMachine {
   steady_power_test,
   power_curve_test,
   exit_test
-} testState;
+} testStateMachine;
+
+testStateMachine testState = test_select;
 
 //Servos (linear actuators)
 Servo pitchActuator;
@@ -101,7 +105,7 @@ void setup() {
   //For the entry into the Serial Monitor, make sure the box next to the baud rate reads "Newline"
   //and not "Both NL & CR" or anything else. Otherwise, text entry will not work, and no testing
   //state transitions can occur
-  Serial.begin(115200);
+  Serial.begin(9600);
   
   // put your setup code here, to run once:
   SetupPins();
@@ -119,7 +123,6 @@ void setup() {
 
   //Calibrate the pitot tube
   CalibratePitotTube();
-  Serial.println("Pitot tube calibrated");
 }
 
 void loop() {
@@ -190,79 +193,98 @@ void loop() {
     //Testing state transitions
     switch(testState) {
       
-      case test_select:
-        Serial.println("Entering test selection state");
-        SelectTest();
-        delay(1000);
-        break;
-        
       case power_select:
+        Serial.println("Leaving power select state");
         testState = test_select;
         break;
         
       case brake:
+        Serial.println("Leaving brake state");
         testState = test_select;
         break;
      
       case pitch:
+        Serial.println("Leaving pitch state");
         testState = test_select;
         break;
 
       case pitot_tube_calibration:
+        Serial.println("Leaving calibrate pitot tube state");
         testState = test_select;
         break;
      
       case pitot_tube_measurement:
+        Serial.println("Leaving read pitot tube state");
         testState = test_select;
         break;
 
       case read_base_resistor_voltage:
+        Serial.println("Leaving read voltage state");
         testState = test_select;
         break;
 
       case read_power:
+        Serial.println("Leaving read power state");
         testState = test_select;
         break;
      
       case emergency_button:
+        Serial.println("Leaving emergency button state");
         testState = test_select;
         break;
      
       case load_disconnect:
+        Serial.println("Leaving load disconnect state");
         testState = test_select;
         break;
      
       case survival_test:
+        Serial.println("Leaving survival state");
         testState = test_select;
         break;
      
       case steady_power_test:
+        Serial.println("Leaving steady power state");
         testState = test_select;
         break;
      
       case power_curve_test:
+        Serial.println("Leaving power curve state");
         testState = test_select;
         break;
      
       case exit_test:
+        Serial.println("Leaving exit test state");
         operatingState = restart; 
         testing = false;
-        break;     
+        testState = test_select;
+        break; 
+
+      case test_select:
+        Serial.println("Hello from the test select state transitions.");
+        Serial.println("Entering test selection state");
+        SelectTest();
+        break;
+        
     }
+
+    Serial.print("Test state after state transitions: ");
+    Serial.println(testState);
 
     //Testing state actions
     switch(testState) {
       
       case test_select:
+        Serial.print("Hello from the test select state actions. ");
+        Serial.println(testState);
         break;
         
       case power_select:
+        Serial.println("Hello from the power select state actions.");
         Serial.print("Select the desired power source. Type e to power externally (from the wall), ");
         Serial.println("i to power internally (from the turbine).");
         while(!Serial.available()) {
         }
-
-        
         String powerInput = Serial.readStringUntil('\n');
         bool setExternal;
 
@@ -278,8 +300,9 @@ void loop() {
           Serial.println("Invalid entry. Returning to test selection...");
         }
         break;
-        
+
       case brake:
+        Serial.println("Hello from the brake state actions.");
         Serial.println("Select brake setting. Type e for engaged, d for disengaged");
         while(!Serial.available()) {
         }
@@ -295,8 +318,9 @@ void loop() {
           Serial.println("Invalid entry. Returning to test selection...");
         }
         break;
-     
-      case pitch:
+
+     case pitch:
+        Serial.println("Hello from the pitch state actions.");
         char message[200];
         sprintf(message, "Select pitch value. Enter an integer value between %d and %d (inclusive)", 
                 MINIMUM_PITCH, MAXIMUM_PITCH);
@@ -313,10 +337,12 @@ void loop() {
         break;
 
       case pitot_tube_calibration:
+        Serial.println("Hello from the calibrate pitot tube state actions.");
         CalibratePitotTube();
         break;
      
       case pitot_tube_measurement:
+        Serial.println("Hello from the read pitot tube state actions.");
         float windSpeed = ReadWindSpeed();
         
         Serial.print("Current wind speed: ");
@@ -325,6 +351,7 @@ void loop() {
         break;
         
       case read_base_resistor_voltage:
+        Serial.println("Hello from the read voltage state actions.");
         int voltageInt = analogRead(LOAD_VOLTAGE);
         float baseResistorVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
 
@@ -334,6 +361,7 @@ void loop() {
         break;
 
       case read_power:
+        Serial.println("Hello from the read power state actions.");
         float power = CalculatePower();
 
         Serial.print("Current power output: ");
@@ -342,24 +370,37 @@ void loop() {
         break;
      
       case emergency_button:
+        Serial.println("Hello from the emergency button state actions.");
         break;
      
       case load_disconnect:
+        Serial.println("Hello from the load disconnect state actions.");
         break;
      
       case survival_test:
+        Serial.println("Hello from the survival state actions.");
         break;
      
       case steady_power_test:
+        Serial.println("Hello from the steady power state actions.");
         break;
      
       case power_curve_test:
+        Serial.println("Hello from the power curve state actions.");
         break;
      
       case exit_test:
-        break;    
+        Serial.println("Hello from the exit test state actions.");
+        break;
+
+      default:
+        Serial.println("Default state triggered.");
     }
+    
+    Serial.print("Test state after state actions: ");
+    Serial.println(testState);
   }
+
   
   
 }
@@ -434,6 +475,8 @@ void CalibratePitotTube() {
   A = abc(0, 0);
   B = abc(1, 0);
   C = abc(2, 0);
+
+  Serial.println("Calibration complete.");
 }
 
 //Reads a manually entered wind speed from the serial monitor during calibration
@@ -552,8 +595,8 @@ float ReadWindSpeed() {
 
 //Selects a test state based on manual user input
 void SelectTest() {
-  Serial.print("Enter a desired test. Valid options:\npwrsrc\nbrake\npitch\nebutt\nloaddis\nptcalib\nptread\n");
-  Serial.print("survival\nsteadypwr\npwrcurve\nreadpwr\nreadvolt\nexit\n");
+  Serial.print("Enter a desired test. Valid options:\npwrsrc\nbrake\npitch\nptcalib\nptread\nreadpwr\nreadvolt\nebutt\nloaddis\n");
+  Serial.print("survival\nsteadypwr\npwrcurve\nexit\n");
 
   while(!Serial.available()){
   }
@@ -586,6 +629,14 @@ void SelectTest() {
   if(input.equals("ptread")) {
     testState = pitot_tube_measurement;
   }
+
+  if(input.equals("readpwr")) {
+    testState = read_power;
+  }
+  
+  if(input.equals("readvolt")) {
+    testState = read_base_resistor_voltage;
+  }
   
   if(input.equals("survival")) {
     testState = survival_test;
@@ -597,14 +648,6 @@ void SelectTest() {
   
   if(input.equals("pwrcurve")) {
     testState = power_curve_test;
-  }
-
-  if(input.equals("readpwr")) {
-    testState = read_power;
-  }
-  
-  if(input.equals("readvolt")) {
-    testState = read_base_resistor_voltage;
   }
   
   if(input.equals("exit")) {
