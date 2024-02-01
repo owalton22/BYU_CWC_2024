@@ -147,45 +147,69 @@ void loop() {
   switch(operatingState) {
     
     case restart:
+    {
       break;
+    }
       
     case power_curve:
+    {
       break;
+    }
     
     case steady_power:
+    {
       break;
+    }
       
     case survival:
+    {
       break;
+    }
       
     case emergency_stop:
+    {
       break;
+    }
       
     case test:
+    {
       testing = true;
       break;
+    }
   }
 
   //Operating state actions
   switch(operatingState) {
     
     case restart:
+    {
       break;
+    }
       
     case power_curve:
+    {
       break;
+    }
     
     case steady_power:
+    {
       break;
+    }
       
     case survival:
+    {
       break;
+    }
       
     case emergency_stop:
+    {
       break;
-      
+    }
+    
     case test:
+    {
       break;
+    }
   }
 
   //This is the testing state machine. It should only execute if we are actively testing
@@ -194,77 +218,105 @@ void loop() {
     switch(testState) {
       
       case power_select:
+      {
         Serial.println("Leaving power select state");
         testState = test_select;
         break;
+      }
         
       case brake:
+      {
         Serial.println("Leaving brake state");
         testState = test_select;
         break;
+      }
      
       case pitch:
+      {
         Serial.println("Leaving pitch state");
         testState = test_select;
         break;
+      }
 
       case pitot_tube_calibration:
+      {
         Serial.println("Leaving calibrate pitot tube state");
         testState = test_select;
         break;
+      }
      
       case pitot_tube_measurement:
+      {
         Serial.println("Leaving read pitot tube state");
         testState = test_select;
         break;
+      }
 
       case read_base_resistor_voltage:
+      {
         Serial.println("Leaving read voltage state");
         testState = test_select;
         break;
+      }
 
       case read_power:
+      {
         Serial.println("Leaving read power state");
         testState = test_select;
         break;
+      }
      
       case emergency_button:
+      {
         Serial.println("Leaving emergency button state");
         testState = test_select;
         break;
-     
+      }
+
       case load_disconnect:
+      {
         Serial.println("Leaving load disconnect state");
         testState = test_select;
         break;
-     
+      }
+      
       case survival_test:
+      {
         Serial.println("Leaving survival state");
         testState = test_select;
         break;
+      }
      
       case steady_power_test:
+      {
         Serial.println("Leaving steady power state");
         testState = test_select;
         break;
+      }
      
       case power_curve_test:
+      {
         Serial.println("Leaving power curve state");
         testState = test_select;
         break;
+      }
      
       case exit_test:
+      {
         Serial.println("Leaving exit test state");
         operatingState = restart; 
         testing = false;
         testState = test_select;
         break; 
+      }
 
       case test_select:
+      {
         Serial.println("Hello from the test select state transitions.");
         Serial.println("Entering test selection state");
         SelectTest();
         break;
+      }
         
     }
 
@@ -275,11 +327,14 @@ void loop() {
     switch(testState) {
       
       case test_select:
+      {
         Serial.print("Hello from the test select state actions. ");
         Serial.println(testState);
         break;
+      }
         
       case power_select:
+      {
         Serial.println("Hello from the power select state actions.");
         Serial.print("Select the desired power source. Type e to power externally (from the wall), ");
         Serial.println("i to power internally (from the turbine).");
@@ -300,8 +355,10 @@ void loop() {
           Serial.println("Invalid entry. Returning to test selection...");
         }
         break;
+      }
 
       case brake:
+      {
         Serial.println("Hello from the brake state actions.");
         Serial.println("Select brake setting. Type e for engaged, d for disengaged");
         while(!Serial.available()) {
@@ -318,10 +375,12 @@ void loop() {
           Serial.println("Invalid entry. Returning to test selection...");
         }
         break;
+      }
 
      case pitch:
+     {
         Serial.println("Hello from the pitch state actions.");
-        char message[200];
+        char message[100];
         sprintf(message, "Select pitch value. Enter an integer value between %d and %d (inclusive)", 
                 MINIMUM_PITCH, MAXIMUM_PITCH);
         Serial.println(message);
@@ -349,8 +408,10 @@ void loop() {
         Serial.print(windSpeed);
         Serial.println(" m/s");
         break;
+     }
         
       case read_base_resistor_voltage:
+      {
         Serial.println("Hello from the read voltage state actions.");
         int voltageInt = analogRead(LOAD_VOLTAGE);
         float baseResistorVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
@@ -359,8 +420,10 @@ void loop() {
         Serial.print(voltageInt);
         Serial.println(" V");
         break;
+      }
 
       case read_power:
+      {
         Serial.println("Hello from the read power state actions.");
         float power = CalculatePower();
 
@@ -368,33 +431,48 @@ void loop() {
         Serial.print(power);
         Serial.println(" W");
         break;
+      }
      
       case emergency_button:
+      {
         Serial.println("Hello from the emergency button state actions.");
         break;
+      }
      
       case load_disconnect:
+      {
         Serial.println("Hello from the load disconnect state actions.");
         break;
+      }
      
       case survival_test:
+      {
         Serial.println("Hello from the survival state actions.");
         break;
+      }
      
       case steady_power_test:
+      {
         Serial.println("Hello from the steady power state actions.");
         break;
+      }
      
       case power_curve_test:
+      {
         Serial.println("Hello from the power curve state actions.");
         break;
+      }
      
       case exit_test:
+      {
         Serial.println("Hello from the exit test state actions.");
         break;
+      }
 
       default:
+      {
         Serial.println("Default state triggered.");
+      }
     }
     
     Serial.print("Test state after state actions: ");
