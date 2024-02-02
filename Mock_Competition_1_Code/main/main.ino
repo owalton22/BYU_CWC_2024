@@ -47,7 +47,7 @@
 #define ANALOG_RANGE 1023.0
 
 //LCD writing global constants. This says to update the LCD every ___ milliseconds
-#define LCD_WRITE_INTERVAL 1000
+#define UPDATE_INTERVAL 1000
 
 //Enum for the overall operating state machine
 typedef enum {
@@ -104,8 +104,14 @@ float A;
 float B;
 float C;
 
-//Global variables for keeping track of time
+//Other global variables
 unsigned long previousMillis = 0;
+float currentRPM = 0.0;
+int currentPitch = 0.0;
+float currentWindSpeed = 0.0;
+float currentPower = 0.0;
+String brakeState = "Dis";
+String powerSource = "Int";
 
 void setup() {
   //Start up the Serial Monitor
@@ -143,7 +149,12 @@ void loop() {
 
   //Update the time to check reading the LCD
   unsigned long currentMillis = millis();
-  if(currentMillis - previousMillis >= LCD_WRITE_INTERVAL) {
+  if(currentMillis - previousMillis >= UPDATE_INTERVAL) {
+    //Update the wind speed, RPM, and power
+    currentWindSpeed = ReadWindSpeed();
+    currentRPM = ReadRPM();
+//    currentPower = CalculatePower();
+
     //Write to the LCD and reset the value of the previous writing time
     WriteToLCD();  
     previousMillis = currentMillis;
@@ -237,7 +248,7 @@ void loop() {
       //Select a test to run
       case test_select:
       {
-        Serial.println("Entering test selection state");
+        Serial.println("----------------------------------------------------------------------------");
         SelectTest();
         break;
       }
@@ -336,6 +347,7 @@ void loop() {
       //Return to the operating state machine in the restart state
       case exit_test:
       {
+        Serial.println("Leaving test state");
         operatingState = restart; 
         testing = false;
         testState = test_select;
@@ -474,24 +486,51 @@ void loop() {
       //Test emergency stop when the emergency button is pressed
       case emergency_button:
       {
+        //Check if the button is pressed
+        if(IsButtonPressed()) {
+          Serial.println("Emergency stop active. Performing stop procedures.");
+          //Engage the brake and pitch the blades out of the wind
+          SetBrake(BRAKE_ENGAGED);
+          SetPitch(MINIMUM_PITCH);
+        }
+        else {
+          Serial.println("Emergency stop not active.");
+        }
         break;
       }
 
       //Test emergency stop when the load is disconnected
       case load_disconnect:
       {
+        //Check if the button is pressed
+        if(!IsLoadConnected()) {
+          Serial.println("Load disconnected. Performing stop procedures.");
+          //Engage the brake and pitch the blades out of the wind
+          SetBrake(BRAKE_ENGAGED);
+          SetPitch(MINIMUM_PITCH);
+        }
+        else {
+          Serial.println("Load connected.");
+        }
         break;
       }
 
       //Test the survival state
       case survival_test:
       {
+         //Pitch blades out of the wind
+        SetPitch(MINIMUM_PITCH);
+        //Short the Motor
+        //TODO: Ask Power Team about using this function, how do we short the motor
+        //SetLoad(SHORTING_RESISTANCE);
+        
         break;
       }
 
       //Test the steady power state
       case steady_power_test:
       {
+
         break;
       }
 
@@ -757,6 +796,12 @@ void SetBrake(int brakePosition) {
   
   //Set the servo to the desired angle
   brakeActuator.writeMicroseconds(brakePosition);
+  if(brakePosition == BRAKE_ENGAGED) {
+    brakeState = "Eng";
+  }
+  else {
+    brakeState = "Dis";
+  }
 }
 
 //Sets the pitch linear actuator to a given position
@@ -765,6 +810,7 @@ void SetPitch(int pitchAngle){
 
   //Set the servo to the desired angle
   pitchActuator.writeMicroseconds(pitchAngle);
+  currentPitch = pitchAngle;
 }
 
 //Sets the load to a given resistance value
@@ -780,10 +826,12 @@ void SetPowerMode(bool setExternal) {
   if(setExternal) {
     digitalWrite(NACELLE_RELAY, LOW);
     digitalWrite(LOAD_BOX_RELAY, HIGH);
+    powerSource = "Ext";
   }
   else {
     digitalWrite(NACELLE_RELAY, HIGH);
     digitalWrite(LOAD_BOX_RELAY, LOW);
+    powerSource = "Int";
   }
 }
 
@@ -896,5 +944,35 @@ void WriteToLCD() {
       lcd.print("exiting test ");
     }
   }
-  
+  //Write out the wind speed (U)
+  lcd.setCursor(0, 1);
+  lcd.print("U: ");
+  lcd.print(currentWindSpeed);
+
+  //Write out the RPM
+  lcd.setCursor(10, 1);
+  lcd.print("RPM: ");
+  int RPM = (int) currentRPM;
+  lcd.print(RPM);
+
+  //Write out the pitch "angle"
+  lcd.setCursor(0, 2);
+  lcd.print((char)224);
+  lcd.print(": ");
+  lcd.print(currentPitch);
+
+  //Write out the brake state
+  lcd.setCursor(10, 2);
+  lcd.print("Brake: ");
+  lcd.print(brakeState);
+
+  //Write out the power
+  lcd.setCursor(0, 3);
+  lcd.print("Pwr: ");
+  lcd.print(currentPower);
+
+  //Write out the current power source
+  lcd.setCursor(10, 3);
+  lcd.print("Src: ");
+  lcd.print(powerSource);
 }
