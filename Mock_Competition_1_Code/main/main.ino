@@ -31,12 +31,13 @@
 #define NACELLE_RELAY 32
 #define LOAD_BOX_RELAY 33
 
-//Linear actuator global constants. For linear actuators, 1000 is fully extended and 2000 is fully retracted
+//Linear actuator global constants. For the PQ12-R, 1000 is fully extended and 2000 is fully retracted.
+//May be different depending on the model of linear actuator used.
 #define INITIAL_PITCH 1500
-#define MINIMUM_PITCH 1200
-#define MAXIMUM_PITCH 1800
-#define BRAKE_DISENGAGED 1300
-#define BRAKE_ENGAGED 1700
+#define MINIMUM_PITCH 1800
+#define MAXIMUM_PITCH 1200
+#define BRAKE_DISENGAGED 1700
+#define BRAKE_ENGAGED 1300
 
 //Resistor bank global constants
 #define INITIAL_RESISTANCE 28.0
@@ -48,6 +49,11 @@
 
 //LCD writing global constants. This says to update the LCD every ___ milliseconds
 #define UPDATE_INTERVAL 1000
+
+//Transition wind speed values
+#define CUT_IN 4
+#define RATED_WIND_SPEED 10.5
+#define CUT_OUT 15
 
 //Enum for the overall operating state machine
 typedef enum {
@@ -72,6 +78,9 @@ typedef enum {
   read_base_resistor_voltage,
   read_power,
   read_rpm,
+  set_load,
+  tune_load,
+  read_load,
   emergency_button,
   load_disconnect,
   survival_test,
@@ -160,7 +169,7 @@ void loop() {
     previousMillis = currentMillis;
   }
 
-
+  
 
   if(Serial.available()){
     String input = Serial.readStringUntil('\n');
@@ -176,26 +185,66 @@ void loop() {
     
     case restart:
     {
+      //If the load is disconnected or the e-stop button is pressed, emergency stop
+      if(!IsLoadConnected() || IsButtonPressed()) {
+        operatingState = emergency_stop;
+      }
+
+      //If the wind speed gets above cut-in speed, change to power curve state
+      else if(currentWindSpeed >= CUT_IN) {
+        operatingState = power_curve;
+      }
+      
       break;
     }
       
     case power_curve:
     {
+      //If the load is disconnected or the e-stop button is pressed, emergency stop
+      if(!IsLoadConnected() || IsButtonPressed()) {
+        operatingState = emergency_stop;
+      }
+
+      //If the wind speed gets above the rated speed, change to steady power state
+      else if(currentWindSpeed >= RATED_WIND_SPEED) {
+        operatingState = steady_power;
+      }
+      
       break;
     }
     
     case steady_power:
     {
+      //If the load is disconnected or the e-stop button is pressed, emergency stop
+      if(!IsLoadConnected() || IsButtonPressed()) {
+        operatingState = emergency_stop;
+      }
+
+      //If the wind speed gets above the cut-out speed, change to survival state
+      else if(currentWindSpeed >= CUT_OUT) {
+        operatingState = survival;
+      }
+      
       break;
     }
       
     case survival:
     {
+      //If the load is disconnected or the e-stop button is pressed, emergency stop
+      if(!IsLoadConnected() || IsButtonPressed()) {
+        operatingState = emergency_stop;
+      }
+      
       break;
     }
       
     case emergency_stop:
     {
+      //If the load is disconnected or the e-stop button is pressed, emergency stop
+      if(IsLoadConnected() && !IsButtonPressed()) {
+        operatingState = restart;
+      }
+      
       break;
     }
       
@@ -211,6 +260,11 @@ void loop() {
     
     case restart:
     {
+      //Disengage the brake, return to initial pitch if low wind speed
+      SetBrake(BRAKE_DISENGAGED);
+      if(currentWindSpeed < CUT_IN) {
+        SetPitch(INITIAL_PITCH);
+      }
       break;
     }
       
@@ -226,11 +280,15 @@ void loop() {
       
     case survival:
     {
+      SetPitch(MINIMUM_PITCH);
       break;
     }
       
     case emergency_stop:
     {
+      //Brake and pitch out of the wind
+      SetBrake(BRAKE_ENGAGED);
+      SetPitch(MINIMUM_PITCH);
       break;
     }
     
@@ -301,9 +359,30 @@ void loop() {
         testState = test_select;
         break;
       }
-
+      
       //Return to test selection after test is run
       case read_rpm:
+      {
+        testState = test_select;
+        break;
+      }
+
+      //Return to test selection after test is run
+      case set_load:
+      {
+        testState = test_select;
+        break;
+      }
+
+      //Return to test selection after test is run
+      case tune_load:
+      {
+        testState = test_select;
+        break;
+      }
+
+      //Return to test selection after test is run
+      case read_load:
       {
         testState = test_select;
         break;
@@ -415,19 +494,29 @@ void loop() {
       //Change the pitch angle of the blades using the linear actuator
       case pitch:
       {
-        char message[100];
-        sprintf(message, "Select pitch value. Enter an integer value between %d and %d (inclusive)", 
-                MINIMUM_PITCH, MAXIMUM_PITCH);
-        Serial.println(message);
-        
-        int pitchInput = ReadInputInt();
+        //Run this test until the user exits
+        while(true) {
+          char message[100];
+          sprintf(message, "Select pitch value. Enter an integer value between %d and %d (inclusive). ", 
+                  MINIMUM_PITCH, MAXIMUM_PITCH);
+          Serial.print(message);
+          Serial.println("Enter 0 to exit");
+          
+          int pitchInput = ReadInputInt();
+    
+          //This is counterintuitive, but MINIMUM_PITCH is a greater value than MAXIMUM_PITCH
+          if(pitchInput <= MINIMUM_PITCH && pitchInput >= MAXIMUM_PITCH) {
+            SetPitch(pitchInput);
+          }
+          else if(pitchInput == 0) {
+            break;
+          }
+          else {
+            Serial.println("Invalid entry.");
+          }
+        }
 
-        if(pitchInput >= MINIMUM_PITCH && pitchInput <= MAXIMUM_PITCH) {
-          SetPitch(pitchInput);
-        }
-        else {
-          Serial.println("Invalid entry. Returning to test selection...");
-        }
+        Serial.println("Returning to test selection...");
         break;
       }
 
@@ -480,6 +569,75 @@ void loop() {
         Serial.print("Current RPM: ");
         Serial.print(rpm);
         Serial.println(" RPM");
+        break;
+      }
+
+      case set_load:
+      {
+        Serial.println("Enter a resistance value between 40 and 100 Ohms");
+        String input = Serial.readStringUntil('\n');
+        float resistance = input.toFloat();
+        SetLoad(resistance);
+
+        char message[100];
+        sprintf(message, "Load resistance set to closest match of %.2f Ohms", resistance);
+        Serial.println(message);
+        break;
+      }
+
+      case tune_load:
+      {
+        //Run this test until the user exits
+        while(true) {
+          
+          Serial.print("Type + to increment the load and - to decrement the load. ");
+          Serial.println("Type exit to leave load tuning");
+          String input = Serial.readStringUntil('\n');
+  
+          if(input.equals("+")) {
+            //The value 1 inrements the load
+            resistorBank.changeResistance(1);
+            Serial.println("Load incremented");
+  
+            //Print out the current load resistance
+            float resistance = resistorBank.getResistance();
+            char message[100];
+            sprintf(message, "Current load resistance is %.2f", resistance);
+            Serial.println(message);
+          }
+          
+          else if(input.equals("-")) {
+            //The value 0 decrements the load
+            resistorBank.changeResistance(0);
+            Serial.println("Load decremented");
+  
+            //Print out the current load resistance
+            float resistance = resistorBank.getResistance();
+            char message[100];
+            sprintf(message, "Current load resistance is %.2f", resistance);
+            Serial.println(message);
+          }
+
+          else if(input.equals("exit")) {
+            break;
+          }
+          
+          else {
+            Serial.println("Invalid entry.");
+          }
+        }
+
+        Serial.println("Returning to test selection...");
+        
+        break;
+      }
+
+      case read_load:
+      {
+        float resistance = resistorBank.getResistance();
+        char message[100];
+        sprintf(message, "Current load resistance is %.2f", resistance);
+        Serial.println(message);
         break;
       }
 
@@ -726,8 +884,8 @@ float ReadWindSpeed() {
 
 //Selects a test state based on manual user input
 void SelectTest() {
-  Serial.print("Enter a desired test. Valid options: pwrsrc, brake, pitch, ptcalib, ptread, readpwr, readvolt, readrpm, ebutt, loaddis,\n");
-  Serial.print("survival, steadypwr, pwrcurve, exit\n");
+  Serial.print("Enter a desired test. Valid options: pwrsrc, brake, pitch, ptcalib, ptread, readpwr, readvolt, readrpm, setload, tuneload, readload,\n");
+  Serial.print("ebutt, loaddis, survival, steadypwr, pwrcurve, exit\n");
 
   while(!Serial.available()){
   }
@@ -771,6 +929,18 @@ void SelectTest() {
 
   if(input.equals("readrpm")) {
     testState = read_rpm;
+  }
+
+  if(input.equals("setload")) {
+    testState = set_load;
+  }
+
+  if(input.equals("tuneload")) {
+    testState = tune_load;
+  }
+
+  if(input.equals("readload")) {
+    testState = read_load;
   }
   
   if(input.equals("survival")) {
@@ -924,6 +1094,15 @@ void WriteToLCD() {
     }
     if(testState == read_rpm) {
       lcd.print("read rpm");
+    }
+    if(testState == set_load) {
+      lcd.print("set load");
+    }
+    if(testState == tune_load) {
+      lcd.print("tune load");
+    }
+    if(testState == read_load) {
+      lcd.print("read load");
     }
     if(testState == emergency_button) {
       lcd.print("e button");
