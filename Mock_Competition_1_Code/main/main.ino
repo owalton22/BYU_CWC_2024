@@ -129,7 +129,7 @@ void setup() {
   //state transitions can occur
   Serial.begin(9600);
   
-  // put your setup code here, to run once:
+  //Set up the pins, LCD, servos, and pressure sensor (functions below)
   SetupPins();
   Serial.println("Pins set up");
   SetupLCD();
@@ -170,10 +170,12 @@ void loop() {
   }
 
   
-
+  //Check to see if there is input. Print it out if input has been entered
   if(Serial.available()){
     String input = Serial.readStringUntil('\n');
     Serial.println(input);
+
+    //If the input was "test", enter the test state
     if(input.equals("test")) {
       Serial.println("Entering test state");
       operatingState = test;
@@ -182,7 +184,7 @@ void loop() {
 
   //Operating state transitions
   switch(operatingState) {
-    
+
     case restart:
     {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
@@ -197,7 +199,7 @@ void loop() {
       
       break;
     }
-      
+
     case power_curve:
     {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
@@ -212,7 +214,7 @@ void loop() {
       
       break;
     }
-    
+
     case steady_power:
     {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
@@ -227,7 +229,7 @@ void loop() {
       
       break;
     }
-      
+
     case survival:
     {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
@@ -237,7 +239,7 @@ void loop() {
       
       break;
     }
-      
+
     case emergency_stop:
     {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
@@ -247,9 +249,10 @@ void loop() {
       
       break;
     }
-      
+
     case test:
     {
+      //Set the "testing" boolean to true to enter the second state machine
       testing = true;
       break;
     }
@@ -270,16 +273,19 @@ void loop() {
       
     case power_curve:
     {
+      //Adjust the load to match best value based on the wind speed
       break;
     }
     
     case steady_power:
     {
+      //Adjust the pitch to keep the RPMs of the motor consistent
       break;
     }
       
     case survival:
     {
+      //Pitch the blades out of the wind completely
       SetPitch(MINIMUM_PITCH);
       break;
     }
@@ -294,138 +300,142 @@ void loop() {
     
     case test:
     {
+      //State actions occur in testing state machine
       break;
     }
   }
 
   //This is the testing state machine. It should only execute if we are actively testing
   if(testing) {
+    //Write current values to the LCD
     WriteToLCD();
     //Testing state transitions
     switch(testState) {
-      //Select a test to run
+      
       case test_select:
       {
+        //Output formatting for readability
         Serial.println("----------------------------------------------------------------------------");
+        //Select a test to run
         SelectTest();
         break;
       }
 
-      //Return to test selection after test is run
       case power_select:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
         
-      //Return to test selection after test is run
       case brake:
       {
-        testState = test_select;
-        break;
-      }
-     
-      //Return to test selection after test is run
-      case pitch:
-      {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
 
-      //Return to test selection after test is run
+      case pitch:
+      {     
+        //Return to test selection after test is run
+        testState = test_select;
+        break;
+      }
+
       case pitot_tube_calibration:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
      
-      //Return to test selection after test is run
       case pitot_tube_measurement:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
 
-      //Return to test selection after test is run
       case read_base_resistor_voltage:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
 
-      //Return to test selection after test is run
       case read_power:
       {
-        testState = test_select;
-        break;
-      }
-      
-      //Return to test selection after test is run
-      case read_rpm:
-      {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
 
-      //Return to test selection after test is run
+      case read_rpm:
+      {      
+        //Return to test selection after test is run
+        testState = test_select;
+        break;
+      }
+
       case set_load:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
 
-      //Return to test selection after test is run
       case tune_load:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
 
-      //Return to test selection after test is run
       case read_load:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
      
-      //Return to test selection after test is run
       case emergency_button:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
 
-      //Return to test selection after test is run
       case load_disconnect:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
       
-      //Return to test selection after test is run
       case survival_test:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
      
-      //Return to test selection after test is run
       case steady_power_test:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
      
-      //Return to test selection after test is run
       case power_curve_test:
       {
+        //Return to test selection after test is run
         testState = test_select;
         break;
       }
      
-      //Return to the operating state machine in the restart state
       case exit_test:
       {
+        //Return to the operating state machine in the restart state
         Serial.println("Leaving test state");
         operatingState = restart; 
         testing = false;
@@ -450,6 +460,7 @@ void loop() {
       //if the turbine is not running and internally if the turbine is running
       case power_select:
       {
+        //Get input from the serial monitor based on the prompt
         Serial.print("Select the desired power source. Type e to power externally (from the wall), ");
         Serial.println("i to power internally (from the turbine).");
         while(!Serial.available()) {
@@ -457,14 +468,19 @@ void loop() {
         String powerInput = Serial.readStringUntil('\n');
         bool setExternal;
 
+        //If the input is "i", set the power mode to internal
         if(powerInput.equals("i")) {
           setExternal = false;
           SetPowerMode(setExternal);
         }
+
+        //If the input is "e", set the power mode to external
         else if(powerInput.equals("e")) {
           setExternal = true;
           SetPowerMode(setExternal);
         }
+
+        //If no entry is detected, return to test selection
         else {
           Serial.println("Invalid entry. Returning to test selection...");
         }
@@ -474,17 +490,23 @@ void loop() {
       //Activate and deactivate the brake using the linear actuator
       case brake:
       {
+        //Get input from the serial monitor based on the prompt
         Serial.println("Select brake setting. Type e for engaged, d for disengaged");
         while(!Serial.available()) {
         }
         String brakeInput = Serial.readStringUntil('\n');
 
+        //If the input is "e", engage the brake
         if(brakeInput.equals("e")) {
           SetBrake(BRAKE_ENGAGED);
         }
+
+        //If the input "d", disengage the brake
         else if(brakeInput.equals("d")) {
           SetBrake(BRAKE_DISENGAGED);
         }
+
+        //If the input is anything else, return to the testing state
         else {
           Serial.println("Invalid entry. Returning to test selection...");
         }
@@ -494,23 +516,29 @@ void loop() {
       //Change the pitch angle of the blades using the linear actuator
       case pitch:
       {
-        //Run this test until the user exits
+        //Run this test until the user manually exits by trapping in the while loop
         while(true) {
+          //Output instructions for entering values for this test
           char message[100];
           sprintf(message, "Select pitch value. Enter an integer value between %d and %d (inclusive). ", 
                   MINIMUM_PITCH, MAXIMUM_PITCH);
           Serial.print(message);
           Serial.println("Enter 0 to exit");
-          
+
+          //Read in the input based on the prompt
           int pitchInput = ReadInputInt();
     
           //This is counterintuitive, but MINIMUM_PITCH is a greater value than MAXIMUM_PITCH
           if(pitchInput <= MINIMUM_PITCH && pitchInput >= MAXIMUM_PITCH) {
             SetPitch(pitchInput);
           }
+
+          //If the input is 0, exit from this test
           else if(pitchInput == 0) {
             break;
           }
+
+          //If the input is invalid, read in a new input
           else {
             Serial.println("Invalid entry.");
           }
@@ -530,8 +558,10 @@ void loop() {
       //Read a wind speed measurement from the pitot tube
       case pitot_tube_measurement:
       {
+        //Read in the wind speed
         float windSpeed = ReadWindSpeed();
-        
+
+        //Output the wind speed read
         Serial.print("Current wind speed: ");
         Serial.print(windSpeed);
         Serial.println(" m/s");
@@ -541,9 +571,11 @@ void loop() {
       //Read the voltage across the resistor
       case read_base_resistor_voltage:
       {
+        //Read in the voltage
         int voltageInt = analogRead(LOAD_VOLTAGE);
         float baseResistorVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
 
+        //Output the voltage read
         Serial.print("Current base resistor voltage: ");
         Serial.print(voltageInt);
         Serial.println(" V");
@@ -553,8 +585,10 @@ void loop() {
       //Read the current power output from the turbine
       case read_power:
       {
+        //Calculate the current power output
         float power = CalculatePower();
 
+        //Output the power calculated
         Serial.print("Current power output: ");
         Serial.print(power);
         Serial.println(" W");
@@ -564,8 +598,10 @@ void loop() {
       //Read the current rpm from the encoder
       case read_rpm:
       {
+        //Read in the current RPM
         float rpm = ReadRPM();
 
+        //Output the current RPM
         Serial.print("Current RPM: ");
         Serial.print(rpm);
         Serial.println(" RPM");
@@ -574,11 +610,22 @@ void loop() {
 
       case set_load:
       {
+        //Get input from the serial monitor based on the prompt
         Serial.println("Enter a resistance value between 40 and 100 Ohms");
         String input = Serial.readStringUntil('\n');
         float resistance = input.toFloat();
-        SetLoad(resistance);
 
+        //Set the load to the input value
+        if(resistance > 40 && resistance < 100) {
+          SetLoad(resistance);
+        }
+
+        //If the output is invalid, return to the test state
+        else {
+          break;
+        }
+
+        //Print out the resistance value
         char message[100];
         sprintf(message, "Load resistance set to closest match of %.2f Ohms", resistance);
         Serial.println(message);
@@ -589,11 +636,12 @@ void loop() {
       {
         //Run this test until the user exits
         while(true) {
-          
+          //Get input from the serial monitor based on the prompt
           Serial.print("Type + to increment the load and - to decrement the load. ");
           Serial.println("Type exit to leave load tuning");
           String input = Serial.readStringUntil('\n');
-  
+
+          //If the input is "+"
           if(input.equals("+")) {
             //The value 1 inrements the load
             resistorBank.changeResistance(1);
@@ -605,7 +653,8 @@ void loop() {
             sprintf(message, "Current load resistance is %.2f", resistance);
             Serial.println(message);
           }
-          
+
+          //If the input is "-"
           else if(input.equals("-")) {
             //The value 0 decrements the load
             resistorBank.changeResistance(0);
@@ -618,23 +667,27 @@ void loop() {
             Serial.println(message);
           }
 
+          //If the input is exit, leave the test
           else if(input.equals("exit")) {
             break;
           }
-          
+
+          //If any other input is detected, read new input
           else {
             Serial.println("Invalid entry.");
           }
         }
 
         Serial.println("Returning to test selection...");
-        
         break;
       }
 
       case read_load:
       {
+        //Get the resistance from the load
         float resistance = resistorBank.getResistance();
+
+        //Output the resistance to the serial monitor
         char message[100];
         sprintf(message, "Current load resistance is %.2f", resistance);
         Serial.println(message);
