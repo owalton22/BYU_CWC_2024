@@ -16,16 +16,17 @@
 #define BRAKE_CONTROL 4
 #define PITCH_CONTROL 5
 //These pins need no special capabilities
-#define SW_PARALLEL 22
-#define SW0 23
-#define SW1 24
-#define SW2 25
-#define SW3 26
-#define SW4 27
-#define SW5 28
-#define SW6 29
-#define SW7 30
-#define E_BUTTON 31
+#define SW_SHORT 45
+#define SW_PARALLEL 39
+#define SW0 37
+#define SW1 35
+#define SW2 33
+#define SW3 31
+#define SW4 29
+#define SW5 27
+#define SW6 25
+#define SW7 23
+#define E_BUTTON 44
 #define LOAD_VOLTAGE A0
 //TODO: Find out why there are two relays
 #define NACELLE_RELAY 32
@@ -33,15 +34,19 @@
 
 //Linear actuator global constants. For the PQ12-R, 1000 is fully extended and 2000 is fully retracted.
 //May be different depending on the model of linear actuator used.
-#define INITIAL_PITCH 1500
-#define MINIMUM_PITCH 1800
-#define MAXIMUM_PITCH 1200
-#define BRAKE_DISENGAGED 1700
-#define BRAKE_ENGAGED 1300
+#define INITIAL_PITCH 1700
+#define MINIMUM_PITCH 1880
+#define MAXIMUM_PITCH 1425
+#define BRAKE_DISENGAGED 1600
+#define BRAKE_ENGAGED 1250
 
 //Resistor bank global constants
-#define INITIAL_RESISTANCE 28.0
+#define LOAD_RESISTOR_RESISTANCE 220.0
+#define MINIMUM_RESISTANCE 0.0
+#define MAXIMUM_RESISTANCE 440.0
 #define BASE_RESISTANCE 10.0 //TODO: REPLACE THIS VALUE WITH AN ACTUAL VALUE
+#define LOAD_SHORTED 1
+#define LOAD_UNSHORTED 0
 
 //Arduino Mega global constants
 #define OPERATING_VOLTAGE 5.0
@@ -80,6 +85,7 @@ typedef enum {
   read_rpm,
   set_load,
   tune_load,
+  short_load,
   read_load,
   emergency_button,
   load_disconnect,
@@ -102,8 +108,8 @@ Encoder encoder(ENCODER_PIN_1, ENCODER_PIN_2);
 bfs::Ms4525do pressureSensor;
 
 //Variable load object
-VariableLoad resistorBank(SW_PARALLEL, SW0, SW1, SW2, SW3, SW4, SW5, SW6, SW7, INITIAL_RESISTANCE);
-float voltageDividerFactor = (BASE_RESISTANCE + INITIAL_RESISTANCE) / BASE_RESISTANCE;
+VariableLoad resistorBank(SW0, SW1, SW2, SW3, SW4, SW5, SW6, SW7, SW_PARALLEL, SW_SHORT, LOAD_RESISTOR_RESISTANCE);
+float voltageDividerFactor = (BASE_RESISTANCE + LOAD_RESISTOR_RESISTANCE) / BASE_RESISTANCE;
 
 //Liquid Crystal Display
 LiquidCrystal_I2C lcd(0x3f, 20, 4);
@@ -134,10 +140,14 @@ void setup() {
   Serial.println("Pins set up");
   SetupLCD();
   Serial.println("LCD set up");
+  lcd.setCursor(0, 0);
+  lcd.print("Starting up...");
   SetupServos();
   Serial.println("Servo set up");
   SetupPressureSensor();
   Serial.println("Pressure sensor set up");
+  SetupLoad();
+  Serial.println("Load set up");
 
   //Set the states for the state machine
   operatingState = restart;
@@ -160,7 +170,9 @@ void loop() {
   unsigned long currentMillis = millis();
   if(currentMillis - previousMillis >= UPDATE_INTERVAL) {
     //Update the wind speed, RPM, and power
+    Serial.println("Starting wind speed reading...");
     currentWindSpeed = ReadWindSpeed();
+    Serial.println("Finished wind speed reading...");
     currentRPM = ReadRPM();
 //    currentPower = CalculatePower();
 
@@ -192,10 +204,10 @@ void loop() {
         operatingState = emergency_stop;
       }
 
-      //If the wind speed gets above cut-in speed, change to power curve state
-      else if(currentWindSpeed >= CUT_IN) {
-        operatingState = power_curve;
-      }
+//      //If the wind speed gets above cut-in speed, change to power curve state
+//      else if(currentWindSpeed >= CUT_IN) {
+//        operatingState = power_curve;
+//      }
       
       break;
     }
@@ -391,6 +403,13 @@ void loop() {
         break;
       }
 
+      case short_load:
+      {
+        //Return to test selection after test is run
+        testState = test_select;
+        break;
+      }
+
       case read_load:
       {
         //Return to test selection after test is run
@@ -518,10 +537,12 @@ void loop() {
       {
         //Run this test until the user manually exits by trapping in the while loop
         while(true) {
+          //Write out info to the LCD display
+          WriteToLCD();
           //Output instructions for entering values for this test
           char message[100];
           sprintf(message, "Select pitch value. Enter an integer value between %d and %d (inclusive). ", 
-                  MINIMUM_PITCH, MAXIMUM_PITCH);
+                  MAXIMUM_PITCH, MINIMUM_PITCH);
           Serial.print(message);
           Serial.println("Enter 0 to exit");
 
@@ -611,17 +632,20 @@ void loop() {
       case set_load:
       {
         //Get input from the serial monitor based on the prompt
-        Serial.println("Enter a resistance value between 40 and 100 Ohms");
+        Serial.println("Enter a resistance value between 0 and 440 Ohms");
+        while(!Serial.available()) {
+        }
         String input = Serial.readStringUntil('\n');
         float resistance = input.toFloat();
 
         //Set the load to the input value
-        if(resistance > 40 && resistance < 100) {
+        if(resistance >= MINIMUM_RESISTANCE && resistance <= MAXIMUM_RESISTANCE) {
           SetLoad(resistance);
         }
 
         //If the output is invalid, return to the test state
         else {
+          Serial.println("Invalid entry.");
           break;
         }
 
@@ -636,11 +660,17 @@ void loop() {
       {
         //Run this test until the user exits
         while(true) {
+          //Write data to the LCD
+          WriteToLCD();
           //Get input from the serial monitor based on the prompt
           Serial.print("Type + to increment the load and - to decrement the load. ");
           Serial.println("Type exit to leave load tuning");
-          String input = Serial.readStringUntil('\n');
+          //Wait to get input
+          while(!Serial.available()) {
+          }
 
+          String input = Serial.readStringUntil('\n');
+          
           //If the input is "+"
           if(input.equals("+")) {
             //The value 1 inrements the load
@@ -680,6 +710,28 @@ void loop() {
 
         Serial.println("Returning to test selection...");
         break;
+      }
+
+      case short_load:
+      {
+        Serial.println("Type s to short the load and u to unshort the load");
+        
+        //Wait to get input
+        while(!Serial.available());
+
+        String shortInput = Serial.readStringUntil('\n');
+
+        if(shortInput.equals("s")){
+          resistorBank.shortLoad(LOAD_SHORTED);
+          Serial.println("Load shorted.");
+        }
+        else if(shortInput.equals("u")) {
+          resistorBank.shortLoad(LOAD_UNSHORTED);
+          Serial.println("Load unshorted.");
+        }
+        else {
+          Serial.println("Invalid entry.");
+        }
       }
 
       case read_load:
@@ -732,6 +784,7 @@ void loop() {
          //Pitch blades out of the wind
         SetPitch(MINIMUM_PITCH);
         //Short the Motor
+        resistorBank.shortLoad(LOAD_SHORTED);
         //TODO: Ask Power Team about using this function, how do we short the motor
         //SetLoad(SHORTING_RESISTANCE);
         
@@ -804,7 +857,7 @@ void CalibratePitotTube() {
     float pressureSum = 0.0;
     int j = 0;
     int k = 0;
-    for (j = 0; j < 1000; j++) {
+    for (j = 0; j < 10000; j++) {
       if(pressureSensor.Read()) {
         k++;
         float currReading = pressureSensor.pres_pa();
@@ -886,7 +939,7 @@ int ReadInputInt() {
   int inputInt = input.toInt();
 
   if(inputInt == 0) {
-    Serial.println("WARNING: Non-integer input detected. If you put in a zero, badly done.");
+    Serial.println("WARNING: Non-integer input detected. If you put in a zero intentionally, disregard.");
   }
   
   return inputInt;
@@ -920,7 +973,7 @@ float ReadWindSpeed() {
     float pressureSum = 0.0;
     int i = 0;
     int j = 0;
-    for (i = 0; i < 100; i++) {
+    for (i = 0; i < 1000; i++) {
       if(pressureSensor.Read()) {
         j++;
         float currReading = pressureSensor.pres_pa();
@@ -937,8 +990,8 @@ float ReadWindSpeed() {
 
 //Selects a test state based on manual user input
 void SelectTest() {
-  Serial.print("Enter a desired test. Valid options: pwrsrc, brake, pitch, ptcalib, ptread, readpwr, readvolt, readrpm, setload, tuneload, readload,\n");
-  Serial.print("ebutt, loaddis, survival, steadypwr, pwrcurve, exit\n");
+  Serial.print("Enter a desired test. Valid options: pwrsrc, brake, pitch, ptcalib, ptread, readpwr, readvolt, readrpm, setload, tuneload, shortload,\n");
+  Serial.print("readload, ebutt, loaddis, survival, steadypwr, pwrcurve, exit\n");
 
   while(!Serial.available()){
   }
@@ -990,6 +1043,10 @@ void SelectTest() {
 
   if(input.equals("tuneload")) {
     testState = tune_load;
+  }
+
+  if(input.equals("shortload")) {
+    testState = short_load;
   }
 
   if(input.equals("readload")) {
@@ -1065,12 +1122,19 @@ void SetupLCD() {
   lcd.backlight();
 }
 
+//Sets up the relay load box
+void SetupLoad() {
+  //Make sure the load isn't shorted
+  resistorBank.shortLoad(LOAD_UNSHORTED);
+  SetLoad(MAXIMUM_RESISTANCE);
+}
+
 //Sets up all Arduino pins
 void SetupPins() {
   //Set all output pins
   pinMode(BRAKE_CONTROL, OUTPUT);
   pinMode(PITCH_CONTROL, OUTPUT);
-  pinMode(E_BUTTON, INPUT);
+  pinMode(E_BUTTON, INPUT_PULLUP);
   pinMode(LOAD_VOLTAGE, INPUT);
   pinMode(NACELLE_RELAY, OUTPUT);
   digitalWrite(NACELLE_RELAY, LOW); //TODO: Find out whether this is the right value
@@ -1124,55 +1188,58 @@ void WriteToLCD() {
     if(testState == test_select) {
       lcd.print("test select");
     }
-    if(testState == power_select) {
+    else if(testState == power_select) {
       lcd.print("power select");
     }
-    if(testState == brake) {
+    else if(testState == brake) {
       lcd.print("brake test");
     }
-    if(testState == pitch) {
+    else if(testState == pitch) {
       lcd.print("pitch test");
     }
-    if(testState == pitot_tube_calibration) {
+    else if(testState == pitot_tube_calibration) {
       lcd.print("pt calib");
     }
-    if(testState == pitot_tube_measurement) {
+    else if(testState == pitot_tube_measurement) {
       lcd.print("pt measure");
     }
-    if(testState == read_base_resistor_voltage) {
+    else if(testState == read_base_resistor_voltage) {
       lcd.print("read voltage");
     }
-    if(testState == read_power) {
+    else if(testState == read_power) {
       lcd.print("read power");
     }
-    if(testState == read_rpm) {
+    else if(testState == read_rpm) {
       lcd.print("read rpm");
     }
-    if(testState == set_load) {
+    else if(testState == set_load) {
       lcd.print("set load");
     }
-    if(testState == tune_load) {
+    else if(testState == tune_load) {
       lcd.print("tune load");
     }
-    if(testState == read_load) {
+    else if(testState == short_load) {
+      lcd.print("short load");
+    }
+    else if(testState == read_load) {
       lcd.print("read load");
     }
-    if(testState == emergency_button) {
+    else if(testState == emergency_button) {
       lcd.print("e button");
     }
-    if(testState == load_disconnect) {
+    else if(testState == load_disconnect) {
       lcd.print("load discon");
     }
-    if(testState == survival_test) {
+    else if(testState == survival_test) {
       lcd.print("survival test");
     }
-    if(testState == steady_power_test) {
+    else if(testState == steady_power_test) {
       lcd.print("stdy pwr test");
     }
-    if(testState == power_curve_test) {
+    else if(testState == power_curve_test) {
       lcd.print("pwr crve test");
     }
-    if(testState == exit_test) {
+    else if(testState == exit_test) {
       lcd.print("exiting test ");
     }
   }
