@@ -34,9 +34,9 @@
 
 //Linear actuator global constants. For the PQ12-R, 1000 is fully extended and 2000 is fully retracted.
 //May be different depending on the model of linear actuator used.
-#define INITIAL_PITCH 1700
+#define INITIAL_PITCH 1300
 #define MINIMUM_PITCH 1800
-#define MAXIMUM_PITCH 1425
+#define MAXIMUM_PITCH 1300
 #define BRAKE_DISENGAGED 1600
 #define BRAKE_ENGAGED 1250
 
@@ -59,6 +59,10 @@
 #define CUT_IN 4
 #define RATED_WIND_SPEED 10.5
 #define CUT_OUT 15
+
+//Transition RPM values
+#define RATED_RPM 2000 //CHANGE THIS VALUE DURING CALIBRATION
+#define SURVIVAL_PITCH 1600 //CHANGE THIS VALUE DURING CALIBRATION
 
 //Enum for the overall operating state machine
 typedef enum {
@@ -127,6 +131,9 @@ float currentWindSpeed = 0.0;
 float currentPower = 0.0;
 String brakeState = "Dis";
 String powerSource = "Int";
+float kp = ;
+float kd = ;
+float previousTime = 0;
 
 void setup() {
   //Start up the Serial Monitor
@@ -204,6 +211,10 @@ void loop() {
         operatingState = emergency_stop;
       }
 
+      else if(ReadRPM() > 0) {
+        operatingState = power_curve;
+      }
+
 //      //If the wind speed gets above cut-in speed, change to power curve state
 //      else if(currentWindSpeed >= CUT_IN) {
 //        operatingState = power_curve;
@@ -219,10 +230,15 @@ void loop() {
         operatingState = emergency_stop;
       }
 
-      //If the wind speed gets above the rated speed, change to steady power state
-      else if(currentWindSpeed >= RATED_WIND_SPEED) {
+      else if(ReadRPM() > RATED_RPM) {
         operatingState = steady_power;
       }
+
+//      //If the wind speed gets above the rated speed, change to steady power state
+//      else if(currentWindSpeed >= RATED_WIND_SPEED) {
+//        operatingState = steady_power;
+          previousTime = millis();
+//      }
       
       break;
     }
@@ -234,10 +250,14 @@ void loop() {
         operatingState = emergency_stop;
       }
 
-      //If the wind speed gets above the cut-out speed, change to survival state
-      else if(currentWindSpeed >= CUT_OUT) {
+      else if(currentPitch >= SURVIVAL_PITCH) {
         operatingState = survival;
       }
+
+//      //If the wind speed gets above the cut-out speed, change to survival state
+//      else if(currentWindSpeed >= CUT_OUT) {
+//        operatingState = survival;
+//      }
       
       break;
     }
@@ -292,6 +312,22 @@ void loop() {
     case steady_power:
     {
       //Adjust the pitch to keep the RPMs of the motor consistent
+      float sigma = 0.05;
+
+      float currentTime = millis();
+
+      float Ts = (currentTime - previousTime) / 1000;
+
+      previousTime = currentTime;'
+
+      float beta = (
+      
+      float previousPitch = currentPitch;
+
+      float error = ReadRPM() - RATED_RPM;
+      
+      float newPitch = kp * error - kd * derivative;
+      SetPitch(newPitch);
       break;
     }
       
@@ -966,7 +1002,7 @@ float ReadRPM() {
     rpm = (dx * 1000000 * 60) / (dt * 2048);
   }
 
-  return rpm;
+  return abs(rpm);
 }
 
 float ReadWindSpeed() {
