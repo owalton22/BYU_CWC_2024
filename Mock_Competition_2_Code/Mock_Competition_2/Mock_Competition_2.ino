@@ -27,7 +27,7 @@
 #define SW6 25
 #define SW7 23
 #define E_BUTTON 44
-#define LOAD_VOLTAGE A0
+#define CURRENT_SENSOR A0
 //TODO: Find out why there are two relays
 #define NACELLE_RELAY 32
 #define LOAD_BOX_RELAY 33
@@ -44,7 +44,6 @@
 #define LOAD_RESISTOR_RESISTANCE 220.0
 #define MINIMUM_RESISTANCE 0.0
 #define MAXIMUM_RESISTANCE 440.0
-#define BASE_RESISTANCE 10.0 //TODO: REPLACE THIS VALUE WITH AN ACTUAL VALUE
 #define LOAD_SHORTED 1
 #define LOAD_UNSHORTED 0
 
@@ -113,7 +112,6 @@ bfs::Ms4525do pressureSensor;
 
 //Variable load object
 VariableLoad resistorBank(SW0, SW1, SW2, SW3, SW4, SW5, SW6, SW7, SW_PARALLEL, SW_SHORT, LOAD_RESISTOR_RESISTANCE);
-float voltageDividerFactor = (BASE_RESISTANCE + LOAD_RESISTOR_RESISTANCE) / BASE_RESISTANCE;
 
 //Liquid Crystal Display
 LiquidCrystal_I2C lcd(0x3f, 20, 4);
@@ -126,14 +124,16 @@ float C;
 //Other global variables
 unsigned long previousMillis = 0;
 float currentRPM = 0.0;
-int currentPitch = 0.0;
+int currentPitch = MINIMUM_PITCH;
+int previousPitch = MINIMUM_PITCH;
 float currentWindSpeed = 0.0;
 float currentPower = 0.0;
 String brakeState = "Dis";
 String powerSource = "Int";
-float kp = ;
-float kd = ;
-float previousTime = 0;
+float kp = 0.1;
+float kd = 0.1;
+float previousTime = 0.0;
+float derivative = 0.0;
 
 void setup() {
   //Start up the Serial Monitor
@@ -181,7 +181,7 @@ void loop() {
     currentWindSpeed = ReadWindSpeed();
     Serial.println("Finished wind speed reading...");
     currentRPM = ReadRPM();
-//    currentPower = CalculatePower();
+    currentPower = CalculatePower();
 
     //Write to the LCD and reset the value of the previous writing time
     WriteToLCD();  
@@ -207,11 +207,11 @@ void loop() {
     case restart:
     {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
-      if(!IsLoadConnected() || IsButtonPressed()) {
+      if(IsButtonPressed()) {
         operatingState = emergency_stop;
       }
 
-      else if(ReadRPM() > 0) {
+      else if(ReadRPM() > 300) {
         operatingState = power_curve;
       }
 
@@ -312,22 +312,38 @@ void loop() {
     case steady_power:
     {
       //Adjust the pitch to keep the RPMs of the motor consistent
+      //Define a sigma value for the dirty derivative
       float sigma = 0.05;
 
+      //Calculate the sample time for this loop
       float currentTime = millis();
-
       float Ts = (currentTime - previousTime) / 1000;
 
-      previousTime = currentTime;'
+      //Reassign the previous time for future loop
+      previousTime = currentTime;
 
-      float beta = (
-      
-      float previousPitch = currentPitch;
+      //Calculate beta for the dirty derivative
+      float beta = (2.0 * sigma - Ts) / (2.0 * sigma + Ts);
 
+      //Use the dirty derivative to estimate the current derivative of the pitch (How fast
+      //is the pitch changing?)
+      derivative = beta * derivative + (1 - beta) * ((currentPitch - previousPitch) / Ts);
+
+      //Reset the previous pitch to the current pitch value
+      previousPitch = currentPitch;
+
+      //Calculate the error in the current RPM (How far off are we?)
       float error = ReadRPM() - RATED_RPM;
+
+      //Calculate the new pitch based on how far off we are AND adjust the change down if
+      //the pitch is currently changing quickly (to avoid stability problems)
+      int newPitch = (int)(kp * error - kd * derivative);
+
+      //Set the new pitch if it is within the bounds for the linear actuator
+      if(newPitch >= MAXIMUM_PITCH && newPitch <= MINIMUM_PITCH) {
+        SetPitch(newPitch);
+      }
       
-      float newPitch = kp * error - kd * derivative;
-      SetPitch(newPitch);
       break;
     }
       
@@ -629,7 +645,7 @@ void loop() {
       case read_base_resistor_voltage:
       {
         //Read in the voltage
-        int voltageInt = analogRead(LOAD_VOLTAGE);
+        int voltageInt = analogRead(CURRENT_SENSOR);
         float baseResistorVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
 
         //Output the voltage read
@@ -859,20 +875,14 @@ void loop() {
 
 //Calculates an estimate of the current power output from the turbine
 float CalculatePower() {
-  //Read the voltage from the load pin and convert it to volts. We are reading in a scaled down voltage that is
-  //only measured across the base resistor as opposed to the whole load. As such, we calculated a voltage
-  //divider factor that converts the voltage we measure to the total voltage across the load, which is the value
-  //we actually want. That voltage divider factor is defined globally and updated each time the resistor bank
-  //changes resistance values.
-  int voltageInt = analogRead(LOAD_VOLTAGE);
-  float baseResistorVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
-  float loadVoltage = baseResistorVoltage * voltageDividerFactor;
+  //Read the current from the current sensor
+  float current = ReadCurrent();
 
   //Read the resistance from the resistor bank
   float resistance = resistorBank.getResistance();
 
   //Calculate and return the power
-  float currentPower = (loadVoltage * loadVoltage) / resistance;
+  currentPower = current * current * resistance;
   return currentPower;
 }
 
@@ -956,14 +966,40 @@ bool IsButtonPressed() {
 
 //Reads whether the load is connected. Returns true if connected and false if not
 bool IsLoadConnected() {
-  //TODO: Might change to add some sort of threshold or something
-  int voltage = analogRead(LOAD_VOLTAGE);
-  return voltage != 0;
+  float amperageFinalValue = ReadCurrent();
+  //Serial.println(AcsValueF);//Print the read current on Serial monitor
+  //delay(50);
+  if(amperageFinalValue >= .02){
+    return 1;
+  }
+  else if (amperageFinalValue < .02){
+    return 0;
+  }
 }
 
 //Assigns the optimal load based on current conditions
 void OptimizeLoad() {
   
+}
+
+//Reads the current from the current sensor
+float ReadCurrent() {
+  unsigned int x=0;
+  float AcsValue=0.0,Samples=0.0,AvgAcs=0.0,amperageFinalValue=0.0;
+  for (int x = 0; x < 50; x++){ //Get 150 samples
+    AcsValue = analogRead(CURRENT_SENSOR);     //Read current sensor values
+    Samples = Samples + AcsValue;  //Add samples together
+    delay (3); // let ADC settle before next sample 3ms
+  }
+  AvgAcs=Samples/50.0;//Taking Average of Samples
+  //((AvgAcs * (5.0 / 1024.0))is converitng the read voltage in 0-5 volts
+  //2.5 is offset(I assumed that arduino is working on 5v so the viout at no current comes
+  //out to be 2.5 which is out offset. If your arduino is working on different voltage than
+  //you must change the offset according to the input voltage)
+  //0.185v(185mV) is rise in output voltage when 1A current flows at input
+  amperageFinalValue = ( (AvgAcs * (5.0 / 1024.0)) - 2.5 )/0.185;
+  
+  return amperageFinalValue;
 }
 
 //Reads an integer input from the serial monitor
@@ -1173,7 +1209,7 @@ void SetupLCD() {
 void SetupLoad() {
   //Make sure the load isn't shorted
   resistorBank.shortLoad(LOAD_UNSHORTED);
-  SetLoad(MAXIMUM_RESISTANCE);
+  SetLoad(MINIMUM_RESISTANCE);
 }
 
 //Sets up all Arduino pins
@@ -1182,7 +1218,7 @@ void SetupPins() {
   pinMode(BRAKE_CONTROL, OUTPUT);
   pinMode(PITCH_CONTROL, OUTPUT);
   pinMode(E_BUTTON, INPUT_PULLUP);
-  pinMode(LOAD_VOLTAGE, INPUT);
+  pinMode(CURRENT_SENSOR, INPUT);
   pinMode(NACELLE_RELAY, OUTPUT);
   digitalWrite(NACELLE_RELAY, LOW); //TODO: Find out whether this is the right value
   pinMode(LOAD_BOX_RELAY, OUTPUT);
