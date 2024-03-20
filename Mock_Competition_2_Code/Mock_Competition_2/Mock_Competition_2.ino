@@ -15,6 +15,8 @@
 //These pins need PWM capability
 #define BRAKE_CONTROL 4
 #define PITCH_CONTROL 5
+//These pins need analog capability
+#define VOLTAGE_SENSOR A0
 //These pins need no special capabilities
 #define SW_SHORT 45
 #define SW_PARALLEL 39
@@ -27,10 +29,9 @@
 #define SW6 25
 #define SW7 23
 #define E_BUTTON 44
-#define CURRENT_SENSOR A0
+
 //TODO: Find out why there are two relays
-#define NACELLE_RELAY 32
-#define LOAD_BOX_RELAY 33
+#define POWER_SWITCH_RELAY 28
 
 //Linear actuator global constants. For the PQ12-R, 1000 is fully extended and 2000 is fully retracted.
 //May be different depending on the model of linear actuator used.
@@ -46,6 +47,9 @@
 #define MAXIMUM_RESISTANCE 440.0
 #define LOAD_SHORTED 1
 #define LOAD_UNSHORTED 0
+#define DISCONNECT_VOLTAGE 0.0
+#define SMALL_READER_RESISTOR 38000.0
+#define LARGE_READER_RESISTOR 380000.0
 
 //Arduino Mega global constants
 #define OPERATING_VOLTAGE 5.0
@@ -60,6 +64,7 @@
 #define CUT_OUT 15
 
 //Transition RPM values
+#define CUT_IN_RPM 100
 #define RATED_RPM 2000 //CHANGE THIS VALUE DURING CALIBRATION
 #define SURVIVAL_PITCH 1600 //CHANGE THIS VALUE DURING CALIBRATION
 
@@ -83,7 +88,7 @@ typedef enum {
   pitch,
   pitot_tube_calibration,
   pitot_tube_measurement,
-  read_base_resistor_voltage,
+  read_voltage,
   read_power,
   read_rpm,
   set_load,
@@ -177,9 +182,9 @@ void loop() {
   unsigned long currentMillis = millis();
   if(currentMillis - previousMillis >= UPDATE_INTERVAL) {
     //Update the wind speed, RPM, and power
-    Serial.println("Starting wind speed reading...");
-    currentWindSpeed = ReadWindSpeed();
-    Serial.println("Finished wind speed reading...");
+//    Serial.println("Starting wind speed reading...");
+//    currentWindSpeed = ReadWindSpeed();
+//    Serial.println("Finished wind speed reading...");
     currentRPM = ReadRPM();
     currentPower = CalculatePower();
 
@@ -209,9 +214,10 @@ void loop() {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
       if(IsButtonPressed()) {
         operatingState = emergency_stop;
+        previousPitch = currentPitch;
       }
 
-      else if(ReadRPM() > 300) {
+      else if(ReadRPM() > CUT_IN_RPM) {
         operatingState = power_curve;
       }
 
@@ -228,6 +234,8 @@ void loop() {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
       if(!IsLoadConnected() || IsButtonPressed()) {
         operatingState = emergency_stop;
+        previousPitch = currentPitch;
+
       }
 
       else if(ReadRPM() > RATED_RPM) {
@@ -248,6 +256,8 @@ void loop() {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
       if(!IsLoadConnected() || IsButtonPressed()) {
         operatingState = emergency_stop;
+        previousPitch = currentPitch;
+
       }
 
       else if(currentPitch >= SURVIVAL_PITCH) {
@@ -267,6 +277,7 @@ void loop() {
       //If the load is disconnected or the e-stop button is pressed, emergency stop
       if(!IsLoadConnected() || IsButtonPressed()) {
         operatingState = emergency_stop;
+        previousPitch = currentPitch;
       }
       
       break;
@@ -274,8 +285,15 @@ void loop() {
 
     case emergency_stop:
     {
-      //If the load is disconnected or the e-stop button is pressed, emergency stop
+      //If the load is connected or the e-stop button is not pressed, restart
       if(IsLoadConnected() && !IsButtonPressed()) {
+        bool setExternal = true;
+        SetPowerMode(setExternal);
+        SetPitch(previousPitch);
+        delay(2000);
+        SetBrake(BRAKE_DISENGAGED);
+        delay(1000);
+
         operatingState = restart;
       }
       
@@ -295,9 +313,13 @@ void loop() {
     
     case restart:
     {
+      //Change power to internal
+      bool setExternal = false;
+      SetPowerMode(setExternal);
+      
       //Disengage the brake, return to initial pitch if low wind speed
       SetBrake(BRAKE_DISENGAGED);
-      if(currentWindSpeed < CUT_IN) {
+      if(ReadRPM() < CUT_IN_RPM) {
         SetPitch(INITIAL_PITCH);
       }
       break;
@@ -305,12 +327,21 @@ void loop() {
       
     case power_curve:
     {
+      //Change power to internal
+      bool setExternal = false;
+      SetPowerMode(setExternal);
+      
       //Adjust the load to match best value based on the wind speed
+      SetPitch(MAXIMUM_PITCH);
       break;
     }
     
     case steady_power:
     {
+      //Change power to internal
+      bool setExternal = false;
+      SetPowerMode(setExternal);
+      
       //Adjust the pitch to keep the RPMs of the motor consistent
       //Define a sigma value for the dirty derivative
       float sigma = 0.05;
@@ -349,6 +380,10 @@ void loop() {
       
     case survival:
     {
+      //Change power to internal
+      bool setExternal = false;
+      SetPowerMode(setExternal);
+      
       //Pitch the blades out of the wind completely
       SetPitch(MINIMUM_PITCH);
       break;
@@ -420,7 +455,7 @@ void loop() {
         break;
       }
 
-      case read_base_resistor_voltage:
+      case read_voltage:
       {
         //Return to test selection after test is run
         testState = test_select;
@@ -642,15 +677,13 @@ void loop() {
       }
 
       //Read the voltage across the resistor
-      case read_base_resistor_voltage:
+      case read_voltage:
       {
-        //Read in the voltage
-        int voltageInt = analogRead(CURRENT_SENSOR);
-        float baseResistorVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
+        float voltage = ReadVoltage();
 
         //Output the voltage read
         Serial.print("Current base resistor voltage: ");
-        Serial.print(voltageInt);
+        Serial.print(voltage);
         Serial.println(" V");
         break;
       }
@@ -671,12 +704,9 @@ void loop() {
       //Read the current rpm from the encoder
       case read_rpm:
       {
-        //Read in the current RPM
-        float rpm = ReadRPM();
-
         //Output the current RPM
         Serial.print("Current RPM: ");
-        Serial.print(rpm);
+        Serial.print(ReadRPM());
         Serial.println(" RPM");
         break;
       }
@@ -876,13 +906,13 @@ void loop() {
 //Calculates an estimate of the current power output from the turbine
 float CalculatePower() {
   //Read the current from the current sensor
-  float current = ReadCurrent();
+  float voltage = ReadVoltage();
 
   //Read the resistance from the resistor bank
   float resistance = resistorBank.getResistance();
 
   //Calculate and return the power
-  currentPower = current * current * resistance;
+  currentPower = voltage * voltage / resistance;
   return currentPower;
 }
 
@@ -966,13 +996,12 @@ bool IsButtonPressed() {
 
 //Reads whether the load is connected. Returns true if connected and false if not
 bool IsLoadConnected() {
-  float amperageFinalValue = ReadCurrent();
-  //Serial.println(AcsValueF);//Print the read current on Serial monitor
-  //delay(50);
-  if(amperageFinalValue >= .02){
+  float voltage = ReadVoltage();
+
+  if(voltage >= DISCONNECT_VOLTAGE){
     return 1;
   }
-  else if (amperageFinalValue < .02){
+  else if (voltage < DISCONNECT_VOLTAGE){
     return 0;
   }
 }
@@ -982,24 +1011,18 @@ void OptimizeLoad() {
   
 }
 
-//Reads the current from the current sensor
-float ReadCurrent() {
-  unsigned int x=0;
-  float AcsValue=0.0,Samples=0.0,AvgAcs=0.0,amperageFinalValue=0.0;
-  for (int x = 0; x < 50; x++){ //Get 150 samples
-    AcsValue = analogRead(CURRENT_SENSOR);     //Read current sensor values
-    Samples = Samples + AcsValue;  //Add samples together
-    delay (3); // let ADC settle before next sample 3ms
-  }
-  AvgAcs=Samples/50.0;//Taking Average of Samples
-  //((AvgAcs * (5.0 / 1024.0))is converitng the read voltage in 0-5 volts
-  //2.5 is offset(I assumed that arduino is working on 5v so the viout at no current comes
-  //out to be 2.5 which is out offset. If your arduino is working on different voltage than
-  //you must change the offset according to the input voltage)
-  //0.185v(185mV) is rise in output voltage when 1A current flows at input
-  amperageFinalValue = ( (AvgAcs * (5.0 / 1024.0)) - 2.5 )/0.185;
+//Reads the voltage measured across the voltage divider
+float ReadVoltage() {
+  //Read in the voltage
+  int voltageInt = analogRead(VOLTAGE_SENSOR);
   
-  return amperageFinalValue;
+  //Convert to the actual voltage reading
+  float dividedVoltage = (voltageInt / ANALOG_RANGE) * OPERATING_VOLTAGE;
+  
+  //Convert from voltage reading to actual voltage (voltage divider used)
+  float voltage = dividedVoltage / (SMALL_READER_RESISTOR / (SMALL_READER_RESISTOR * LARGE_READER_RESISTOR));
+  
+  return voltage;
 }
 
 //Reads an integer input from the serial monitor
@@ -1021,24 +1044,38 @@ int ReadInputInt() {
 
 //Reads the current RPMs from the encoder
 float ReadRPM() {
-  static long oldPosition = 0;
-  static long oldTime = 0;
-  static float rpm = 0;
+  int numSamples = 100;
 
-  long newPosition = encoder.read();
+  float sumRPM = 0.0;
 
-  if(newPosition != oldPosition) {
-    long newTime = micros();
-    float dx = newPosition - oldPosition;
-    float dt = newTime - oldTime;
-    oldPosition = newPosition;
-    oldTime = newTime;
-    //TODO: Check this conversion to see if it needs to be updated for the new encoder
-    //1000000*60 converts time from microseconds to minutes, 2048 converts dx to rotations
-    rpm = (dx * 1000000 * 60) / (dt * 2048);
+  int count = 0;
+
+  for(int i=0; i<numSamples; i++) {
+    static long oldPosition = 0;
+    static long oldTime = 0;
+    static float rpm = 0;
+  
+    long newPosition = encoder.read();
+  
+    if(newPosition != oldPosition) {
+      long newTime = micros();
+      float dx = newPosition - oldPosition;
+      float dt = newTime - oldTime;
+      oldPosition = newPosition;
+      oldTime = newTime;
+      //TODO: Check this conversion to see if it needs to be updated for the new encoder
+      //1000000*60 converts time from microseconds to minutes, 2048 converts dx to rotations
+      rpm = (dx * 1000000 * 60) / (dt * 2048);
+      
+      sumRPM += rpm;
+    }
+    
+
   }
+  
+  float averageRPM = sumRPM / numSamples;
 
-  return abs(rpm);
+  return abs(averageRPM);
 }
 
 float ReadWindSpeed() {
@@ -1113,7 +1150,7 @@ void SelectTest() {
   }
   
   if(input.equals("readvolt")) {
-    testState = read_base_resistor_voltage;
+    testState = read_voltage;
   }
 
   if(input.equals("readrpm")) {
@@ -1187,13 +1224,11 @@ void SetLoad(float resistance) {
 void SetPowerMode(bool setExternal) {
   //TODO: ARE THESE THE RIGHT VALUES?
   if(setExternal) {
-    digitalWrite(NACELLE_RELAY, LOW);
-    digitalWrite(LOAD_BOX_RELAY, HIGH);
+    digitalWrite(POWER_SWITCH_RELAY, HIGH);
     powerSource = "Ext";
   }
   else {
-    digitalWrite(NACELLE_RELAY, HIGH);
-    digitalWrite(LOAD_BOX_RELAY, LOW);
+    digitalWrite(POWER_SWITCH_RELAY, LOW);
     powerSource = "Int";
   }
 }
@@ -1218,11 +1253,11 @@ void SetupPins() {
   pinMode(BRAKE_CONTROL, OUTPUT);
   pinMode(PITCH_CONTROL, OUTPUT);
   pinMode(E_BUTTON, INPUT_PULLUP);
-  pinMode(CURRENT_SENSOR, INPUT);
-  pinMode(NACELLE_RELAY, OUTPUT);
-  digitalWrite(NACELLE_RELAY, LOW); //TODO: Find out whether this is the right value
-  pinMode(LOAD_BOX_RELAY, OUTPUT);
-  digitalWrite(LOAD_BOX_RELAY, HIGH); //TODO: Find out whether this is the right value
+  pinMode(VOLTAGE_SENSOR, INPUT);
+  pinMode(POWER_SWITCH_RELAY, OUTPUT);
+  bool setExternal = true;
+  SetPowerMode(setExternal);
+  
 }
 
 //Sets up the pressure sensor
@@ -1286,7 +1321,7 @@ void WriteToLCD() {
     else if(testState == pitot_tube_measurement) {
       lcd.print("pt measure");
     }
-    else if(testState == read_base_resistor_voltage) {
+    else if(testState == read_voltage) {
       lcd.print("read voltage");
     }
     else if(testState == read_power) {
@@ -1334,8 +1369,7 @@ void WriteToLCD() {
   //Write out the RPM
   lcd.setCursor(10, 1);
   lcd.print("RPM: ");
-  int RPM = (int) currentRPM;
-  lcd.print(RPM);
+  lcd.print(currentRPM);
 
   //Write out the pitch "angle"
   lcd.setCursor(0, 2);
