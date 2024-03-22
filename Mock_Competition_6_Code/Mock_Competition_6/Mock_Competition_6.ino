@@ -338,50 +338,89 @@ void loop() {
     
     case steady_power:
     {
-      //Change power to internal
-      bool setExternal = false;
-      SetPowerMode(setExternal);
-      
-      //Adjust the pitch to keep the RPMs of the motor consistent
-      //Define a sigma value for the dirty derivative
-      float sigma = 0.05;
+      unsigned long controlStart = millis();
+      unsigned long controlTimer = millis();
 
-      //Calculate the sample time for this loop
-      float currentTime = millis();
-      float Ts = (currentTime - previousTime) / 1000;
+      while(controlTimer - controlStart < 10000) {
+        //Change power to internal
+        bool setExternal = false;
+        SetPowerMode(setExternal);
+        
+        //Adjust the pitch to keep the RPMs of the motor consistent
+        //Define a sigma value for the dirty derivative
+        float sigma = 0.05;
 
-      //Reassign the previous time for future loop
-      previousTime = currentTime;
+        //Calculate the sample time for this loop
+        float currentTime = millis();
+        float Ts = (currentTime - previousTime) / 1000;
 
-      //Calculate beta for the dirty derivative
-      float beta = (2.0 * sigma - Ts) / (2.0 * sigma + Ts);
+        //Reassign the previous time for future loop
+        previousTime = currentTime;
 
-      //Use the dirty derivative to estimate the current derivative of the pitch (How fast
-      //is the pitch changing?)
-      derivative = beta * derivative + (1 - beta) * ((currentPitch - previousPitch) / Ts);
+        //Calculate beta for the dirty derivative
+        float beta = (2.0 * sigma - Ts) / (2.0 * sigma + Ts);
 
-      //Reset the previous pitch to the current pitch value
-      previousPitch = currentPitch;
+        //Use the dirty derivative to estimate the current derivative of the pitch (How fast
+        //is the pitch changing?)
+        derivative = beta * derivative + (1 - beta) * ((currentPitch - previousPitch) / Ts);
 
-      //Calculate the error in the current RPM (How far off are we?)
-      float error = ReadRPM() - RATED_RPM;
+        //Reset the previous pitch to the current pitch value
+        previousPitch = currentPitch;
 
-      //Calculate the new pitch based on how far off we are AND adjust the change down if
-      //the pitch is currently changing quickly (to avoid stability problems)
-      float pitchTilde = (kp * error - kd * derivative);
-      int newPitch = (int) previousPitch + pitchTilde;
+        //Calculate the error in the current RPM (How far off are we?)
+        float error = ReadRPM() - RATED_RPM;
 
-      //Set the new pitch if it is within the bounds for the linear actuator
-      if(newPitch <= MAXIMUM_PITCH) {
-        SetPitch(MAXIMUM_PITCH);
+        //Calculate the new pitch based on how far off we are AND adjust the change down if
+        //the pitch is currently changing quickly (to avoid stability problems)
+        float pitchTilde = (kp * error - kd * derivative);
+        int newPitch = (int) previousPitch + pitchTilde;
+
+        //Set the new pitch if it is within the bounds for the linear actuator
+        if(newPitch <= MAXIMUM_PITCH) {
+          SetPitch(MAXIMUM_PITCH);
+        }
+        else if(newPitch >= MINIMUM_PITCH) {
+          SetPitch(MINIMUM_PITCH);
+        }
+        else {
+          SetPitch(newPitch);
+        }
+
+        controlTimer = millis();
       }
-      else if(newPitch >= MINIMUM_PITCH) {
-        SetPitch(MINIMUM_PITCH);
+
+      Serial.println("Adjust the parameters? Options: kp+, kp++, kp-, kp--, kd+, kd++, kd-, kd--");
+
+      String input = Serial.readStringUntil('\n');
+      if(input.equals("kp+")){
+        kp = kp + 0.01;
       }
-      else {
-        SetPitch(newPitch);
+      else if(input.equals("kp++")){
+        kp = kp + 0.1;
       }
-      
+      else if(input.equals("kp-")){
+        kp = kp - 0.01;
+      }
+      else if(input.equals("kp--")){
+        kp = kp - 0.1;
+      }
+      else if(input.equals("kd+")){
+        kd = kd + 0.01;
+      }
+      else if(input.equals("kd++")){
+        kd = kd + 0.1;
+      }
+      else if(input.equals("kd-")){
+        kd = kd - 0.01;
+      }
+      else if(input.equals("kd--")){
+        kd = kd - 0.1;
+      }
+
+      Serial.print("kp: ");
+      Serial.print(kp);
+      Serial.print("; kd: ");
+      Serial.println(kd);
       break;
     }
       
