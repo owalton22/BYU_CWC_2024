@@ -64,7 +64,7 @@
 #define CUT_OUT 15
 
 //Transition RPM values
-#define CUT_IN_RPM 400
+#define CUT_IN_RPM 300
 #define RATED_RPM 2700 //CHANGE THIS VALUE DURING CALIBRATION
 #define SURVIVAL_PITCH 1700 //CHANGE THIS VALUE DURING CALIBRATION
 
@@ -298,22 +298,27 @@ void loop() {
     case emergency_stop:
     {
       //If the load is connected or the e-stop button is not pressed, restart
-      if(IsLoadConnected() && !IsButtonPressed()) {
+      if(!IsButtonPressed()) {
         Serial.println("Restarting");
         //Power externally to reset the system to the desired state
         bool setExternal = true;
         SetPowerMode(setExternal);
         SetPitch(previousPitch);
-        delay(2000);
-        SetBrake(BRAKE_DISENGAGED);
+        Serial.println("Pitching back to original position");
         delay(1000);
-
-        //Set power mode back to internal and wait to stop spinning
-        setExternal = false;
-        SetPowerMode(setExternal);
+        SetBrake(BRAKE_DISENGAGED);
+        Serial.println("Disengaging brake");
         delay(2000);
 
-        operatingState = previousState;
+        //If we're getting an RPM reading, the load must be connected. Transition out
+        if(ReadRPM() >= CUT_IN_RPM) {
+          Serial.println("Got an RPM reading. Leaving e-stop");
+          operatingState = previousState;
+          //Set power mode back to internal and wait to stop spinning
+          setExternal = false;
+          SetPowerMode(setExternal);
+          delay(2000);
+        }
       }
       
       break;
@@ -461,6 +466,7 @@ void loop() {
       //Brake and pitch out of the wind
       SetBrake(BRAKE_ENGAGED);
       SetPitch(MINIMUM_PITCH);
+      delay(3000);
       break;
     }
     

@@ -47,7 +47,7 @@
 #define MAXIMUM_RESISTANCE 440.0
 #define LOAD_SHORTED 1
 #define LOAD_UNSHORTED 0
-#define DISCONNECT_VOLTAGE 0.0
+#define DISCONNECT_VOLTAGE 0.1
 #define SMALL_READER_RESISTOR 38000.0
 #define LARGE_READER_RESISTOR 380000.0
 
@@ -65,7 +65,7 @@
 
 //Transition RPM values
 #define CUT_IN_RPM 100
-#define RATED_RPM 24700 //CHANGE THIS VALUE DURING CALIBRATION
+#define RATED_RPM 2500 //CHANGE THIS VALUE DURING CALIBRATION
 #define SURVIVAL_PITCH 1600 //CHANGE THIS VALUE DURING CALIBRATION
 
 //Enum for the overall operating state machine
@@ -338,90 +338,92 @@ void loop() {
     
     case steady_power:
     {
-      unsigned long controlStart = millis();
-      unsigned long controlTimer = millis();
-
-      while(controlTimer - controlStart < 10000) {
-        //Change power to internal
-        bool setExternal = false;
-        SetPowerMode(setExternal);
-        
-        //Adjust the pitch to keep the RPMs of the motor consistent
-        //Define a sigma value for the dirty derivative
-        float sigma = 0.05;
-
-        //Calculate the sample time for this loop
-        float currentTime = millis();
-        float Ts = (currentTime - previousTime) / 1000;
-
-        //Reassign the previous time for future loop
-        previousTime = currentTime;
-
-        //Calculate beta for the dirty derivative
-        float beta = (2.0 * sigma - Ts) / (2.0 * sigma + Ts);
-
-        //Use the dirty derivative to estimate the current derivative of the pitch (How fast
-        //is the pitch changing?)
-        derivative = beta * derivative + (1 - beta) * ((currentPitch - previousPitch) / Ts);
-
-        //Reset the previous pitch to the current pitch value
-        previousPitch = currentPitch;
-
-        //Calculate the error in the current RPM (How far off are we?)
-        float error = ReadRPM() - RATED_RPM;
-
-        //Calculate the new pitch based on how far off we are AND adjust the change down if
-        //the pitch is currently changing quickly (to avoid stability problems)
-        float pitchTilde = (kp * error - kd * derivative);
-        int newPitch = (int) previousPitch + pitchTilde;
-
-        //Set the new pitch if it is within the bounds for the linear actuator
-        if(newPitch <= MAXIMUM_PITCH) {
-          SetPitch(MAXIMUM_PITCH);
-        }
-        else if(newPitch >= MINIMUM_PITCH) {
-          SetPitch(MINIMUM_PITCH);
-        }
-        else {
-          SetPitch(newPitch);
-        }
-
-        controlTimer = millis();
-      }
-
-      Serial.println("Adjust the parameters? Options: kp+, kp++, kp-, kp--, kd+, kd++, kd-, kd--");
-
-      String input = Serial.readStringUntil('\n');
-      if(input.equals("kp+")){
-        kp = kp + 0.01;
-      }
-      else if(input.equals("kp++")){
-        kp = kp + 0.1;
-      }
-      else if(input.equals("kp-")){
-        kp = kp - 0.01;
-      }
-      else if(input.equals("kp--")){
-        kp = kp - 0.1;
-      }
-      else if(input.equals("kd+")){
-        kd = kd + 0.01;
-      }
-      else if(input.equals("kd++")){
-        kd = kd + 0.1;
-      }
-      else if(input.equals("kd-")){
-        kd = kd - 0.01;
-      }
-      else if(input.equals("kd--")){
-        kd = kd - 0.1;
-      }
-
-      Serial.print("kp: ");
-      Serial.print(kp);
-      Serial.print("; kd: ");
-      Serial.println(kd);
+      SetPitch(MINIMUM_PITCH);
       break;
+      // unsigned long controlStart = millis();
+      // unsigned long controlTimer = millis();
+
+      // while(controlTimer - controlStart < 10000) {
+      //   //Change power to internal
+      //   bool setExternal = false;
+      //   SetPowerMode(setExternal);
+        
+      //   //Adjust the pitch to keep the RPMs of the motor consistent
+      //   //Define a sigma value for the dirty derivative
+      //   float sigma = 0.05;
+
+      //   //Calculate the sample time for this loop
+      //   float currentTime = millis();
+      //   float Ts = (currentTime - previousTime) / 1000;
+
+      //   //Reassign the previous time for future loop
+      //   previousTime = currentTime;
+
+      //   //Calculate beta for the dirty derivative
+      //   float beta = (2.0 * sigma - Ts) / (2.0 * sigma + Ts);
+
+      //   //Use the dirty derivative to estimate the current derivative of the pitch (How fast
+      //   //is the pitch changing?)
+      //   derivative = beta * derivative + (1 - beta) * ((currentPitch - previousPitch) / Ts);
+
+      //   //Reset the previous pitch to the current pitch value
+      //   previousPitch = currentPitch;
+
+      //   //Calculate the error in the current RPM (How far off are we?)
+      //   float error = ReadRPM() - RATED_RPM;
+
+      //   //Calculate the new pitch based on how far off we are AND adjust the change down if
+      //   //the pitch is currently changing quickly (to avoid stability problems)
+      //   float pitchTilde = (kp * error - kd * derivative);
+      //   int newPitch = (int) previousPitch + pitchTilde;
+
+      //   //Set the new pitch if it is within the bounds for the linear actuator
+      //   if(newPitch <= MAXIMUM_PITCH) {
+      //     SetPitch(MAXIMUM_PITCH);
+      //   }
+      //   else if(newPitch >= MINIMUM_PITCH) {
+      //     SetPitch(MINIMUM_PITCH);
+      //   }
+      //   else {
+      //     SetPitch(newPitch);
+      //   }
+
+      //   controlTimer = millis();
+      // }
+
+      // Serial.println("Adjust the parameters? Options: kp+, kp++, kp-, kp--, kd+, kd++, kd-, kd--");
+
+      // String input = Serial.readStringUntil('\n');
+      // if(input.equals("kp+")){
+      //   kp = kp + 0.01;
+      // }
+      // else if(input.equals("kp++")){
+      //   kp = kp + 0.1;
+      // }
+      // else if(input.equals("kp-")){
+      //   kp = kp - 0.01;
+      // }
+      // else if(input.equals("kp--")){
+      //   kp = kp - 0.1;
+      // }
+      // else if(input.equals("kd+")){
+      //   kd = kd + 0.01;
+      // }
+      // else if(input.equals("kd++")){
+      //   kd = kd + 0.1;
+      // }
+      // else if(input.equals("kd-")){
+      //   kd = kd - 0.01;
+      // }
+      // else if(input.equals("kd--")){
+      //   kd = kd - 0.1;
+      // }
+
+      // Serial.print("kp: ");
+      // Serial.print(kp);
+      // Serial.print("; kd: ");
+      // Serial.println(kd);
+      // break;
     }
       
     case survival:
@@ -891,7 +893,7 @@ void loop() {
       //Test emergency stop when the load is disconnected
       case load_disconnect:
       {
-        //Check if the button is pressed
+        //Check if the load is disconnected
         if(!IsLoadConnected()) {
           Serial.println("Load disconnected. Performing stop procedures.");
           //Engage the brake and pitch the blades out of the wind
@@ -909,8 +911,6 @@ void loop() {
       {
          //Pitch blades out of the wind
         SetPitch(MINIMUM_PITCH);
-        //Short the Motor
-        resistorBank.shortLoad(LOAD_SHORTED);
         //TODO: Ask Power Team about using this function, how do we short the motor
         //SetLoad(SHORTING_RESISTANCE);
         
@@ -958,7 +958,7 @@ float CalculatePower() {
   float resistance = resistorBank.getResistance();
 
   //Calculate and return the power
-  power = voltage * voltage / resistance;
+  float power = voltage * voltage / resistance;
   return power;
 }
 
