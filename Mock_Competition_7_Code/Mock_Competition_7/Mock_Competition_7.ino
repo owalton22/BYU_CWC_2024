@@ -1,15 +1,15 @@
 //Include necessary libraries
-#include "ms4525do.h"
-#include <Servo.h>
-#include <Encoder.h>
-#include <LiquidCrystal_I2C.h>
-#include <Wire.h>
-#include <string.h>
-#include "VariableLoad.h"
-#include <BasicLinearAlgebra.h>
+#include "ms4525do.h" //Bolder Flight Systems MS4525 by Brian Taylor
+#include <Servo.h> //PWMServo by Jim Studt et al.
+#include <Encoder.h> //Encoder by Paul Stoffregen
+#include <LiquidCrystal_I2C.h> //LiquidCrystal I2C by Frank de Brabander
+#include <Wire.h> //Default library
+#include <string.h> //Default library
+#include "VariableLoad.h" //MUST BE MANUALLY ADDED TO ARDUINO LIBRARIES FOLDER, FIND ON GITHUB
+#include <BasicLinearAlgebra.h> //BasicLinearAlgebra by Tom Stewart
 
 //Global constants for pins to be used
-//These pins need interrupt capability
+//At least one of these pins needs interrupt capability (pin 2)
 #define ENCODER_PIN_1 2
 #define ENCODER_PIN_2 6
 //These pins need PWM capability
@@ -29,8 +29,6 @@
 #define SW6 25
 #define SW7 23
 #define E_BUTTON 44
-
-//TODO: Find out why there are two relays
 #define POWER_SWITCH_RELAY 28
 
 //Linear actuator global constants. For the PQ12-R, 1000 is fully extended and 2000 is fully retracted.
@@ -38,8 +36,8 @@
 #define INITIAL_PITCH 1300
 #define MINIMUM_PITCH 1800
 #define MAXIMUM_PITCH 1300
-#define BRAKE_DISENGAGED 1600
-#define BRAKE_ENGAGED 1250
+#define BRAKE_DISENGAGED 1450
+#define BRAKE_ENGAGED 1225
 
 //Resistor bank global constants
 #define LOAD_RESISTOR_RESISTANCE 220.0
@@ -65,9 +63,10 @@
 
 //Transition RPM values
 #define CUT_IN_RPM 300
-#define RATED_RPM 2700 //CHANGE THIS VALUE DURING CALIBRATION
-#define SURVIVAL_PITCH 1700 //CHANGE THIS VALUE DURING CALIBRATION
+#define RATED_RPM 2950 //CHANGE THIS VALUE DURING CALIBRATION
+#define SURVIVAL_PITCH 1600 //CHANGE THIS VALUE DURING CALIBRATION
 
+//Enum for the substates within the overall state machine
 typedef enum {
   restart,
   power_curve,
@@ -77,6 +76,7 @@ typedef enum {
   test
 } operatingStateMachine;
 
+//Variables to keep track of current and previous state
 operatingStateMachine operatingState = restart;
 operatingStateMachine previousState = restart;
 
@@ -103,6 +103,7 @@ typedef enum {
   exit_test
 } testStateMachine;
 
+//Variable to keep track of current test state
 testStateMachine testState = test_select;
 
 //Servos (linear actuators)
@@ -126,8 +127,10 @@ float A;
 float B;
 float C;
 
-//Other global variables
+//Variable used in timing
 unsigned long previousMillis = 0;
+
+//Variables written to the LCD
 float currentRPM = 0.0;
 int currentPitch = MINIMUM_PITCH;
 int previousPitch = MINIMUM_PITCH;
@@ -135,6 +138,8 @@ float currentWindSpeed = 0.0;
 float currentPower = 0.0;
 String brakeState = "Dis";
 String powerSource = "Int";
+
+//Control loop variables (NOT CALIBRATED)
 float kp = 0.02;
 float kd = 0.0;
 float previousTime = 0.0;
@@ -156,13 +161,17 @@ void setup() {
   lcd.print("Starting up...");
   SetupServos();
   Serial.println("Servo set up");
+  //This line might throw an error saying "Error communicating with the 
+  //pressure sensor" because the pitot tube is not connected, don't fret
+  //The code will still work
   SetupPressureSensor();
   Serial.println("Pressure sensor set up");
   SetupLoad();
   Serial.println("Load set up");
 
-  //Calibrate the pitot tube
-  CalibratePitotTube();
+  //Calibrate the pitot tube. Commented out because pitot tube isn't
+  //working consistently
+  // CalibratePitotTube();
 
   //Wait 3 seconds for linear actuators to reach correct positions
   delay(3000);
@@ -191,7 +200,8 @@ void loop() {
   //Update the time to check reading the LCD
   unsigned long currentMillis = millis();
   if(currentMillis - previousMillis >= UPDATE_INTERVAL) {
-    //Update the wind speed, RPM, and power
+    //Update the wind speed, RPM, and power.
+    //Wind speed is commented out due to inaccurate pitot tube readings
 //    Serial.println("Starting wind speed reading...");
 //    currentWindSpeed = ReadWindSpeed();
 //    Serial.println("Finished wind speed reading...");
@@ -221,13 +231,14 @@ void loop() {
 
     case restart:
     {
-      //If the load is disconnected or the e-stop button is pressed, emergency stop
+      //If the e-stop button is pressed, emergency stop. No load disconnect possible
       if(IsButtonPressed()) {
         previousState = operatingState;
         operatingState = emergency_stop;
         previousPitch = currentPitch;
       }
 
+      //Once the blades start spinning fast enough, move to power curve
       else if(ReadRPM() > CUT_IN_RPM) {
         operatingState = power_curve;
       }
@@ -249,6 +260,7 @@ void loop() {
         previousPitch = currentPitch;
       }
 
+      //Once the RPMs exceed the 11 m/s RPMs, move to steady power
       else if(ReadRPM() > RATED_RPM) {
         operatingState = steady_power;
       }
@@ -271,6 +283,7 @@ void loop() {
         previousPitch = currentPitch;
       }
 
+      //Once the pitch angle exceeds the survival pitch angle, change to survival
       else if(currentPitch >= SURVIVAL_PITCH) {
         operatingState = survival;
       }
@@ -297,10 +310,15 @@ void loop() {
 
     case emergency_stop:
     {
-      //If the load is connected or the e-stop button is not pressed, restart
+      //NOTE: While the load is disconnected, this code will continually
+      //run, but because the nacelle has no power, nothing will happen.
+      //This is an intentional design decision. Once the load is 
+      //reconnected, the actions will execute and actually change the state
+      //If the e-stop button is not pressed, restart
       if(!IsButtonPressed()) {
         Serial.println("Restarting");
-        //Power externally to reset the system to the desired state
+
+        //Power externally and reset the system to the desired state
         bool setExternal = true;
         SetPowerMode(setExternal);
         SetPitch(previousPitch);
@@ -362,6 +380,11 @@ void loop() {
     
     case steady_power:
     {
+      //NOTE: All of the currently commented out code contains the 
+      //control loop. We believe it is written correctly but haven't
+      //thoroughly tested it or calibrated the kp and kd values.
+      //The commented out code also includes the ability to tune the kp 
+      //and kd values. Reach out to one of us if you have any questions.
 //      unsigned long controlStart = millis();
 //      unsigned long controlTimer = millis();
 //
@@ -446,6 +469,7 @@ void loop() {
 //      Serial.print("; kd: ");
 //      Serial.println(kd);
 
+      //This state simply slows the rotation speed to get 25 points
       SetPitch(SURVIVAL_PITCH);
       break;
     }
@@ -465,7 +489,7 @@ void loop() {
     {
       //Brake and pitch out of the wind
       SetBrake(BRAKE_ENGAGED);
-      SetPitch(MINIMUM_PITCH);
+      // SetPitch(MINIMUM_PITCH);
       delay(3000);
       break;
     }
@@ -1079,7 +1103,7 @@ bool IsLoadConnected() {
   }
 }
 
-//Assigns the optimal load based on current conditions
+//Assigns the optimal load based on current conditions. Incomplete
 void OptimizeLoad() {
   
 }
